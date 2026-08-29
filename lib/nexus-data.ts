@@ -32,6 +32,10 @@ export const metrics = { service: 'payment-api', window: 'last_60m', latency_ms:
 export const deployments = [{ version: 'v2.7.3', service: 'payment-api', time: '14:29', status: 'successful', actor: 'release-bot', change: 'Connection pooling configuration' }, { version: 'v2.7.2', service: 'payment-api', time: 'yesterday 18:02', status: 'successful', actor: 'release-bot', change: 'PCI logging updates' }]
 
 export const tools = [
+  { name: 'get_active_incidents', category: 'OBSERVATION', description: 'List active production incidents requiring operator attention.', input: 'none', output: 'Structured JSON' },
+  { name: 'get_incident_evidence', category: 'OBSERVATION', description: 'Return correlated metrics, logs, timeline, and deployment evidence for an incident.', input: '{ incident_id }', output: 'Structured JSON' },
+  { name: 'create_investigation_finding', category: 'INVESTIGATION', description: 'Store a human- or agent-authored finding against an incident for operator review.', input: '{ incident_id, finding }', output: 'Structured JSON' },
+  { name: 'verify_incident', category: 'VERIFICATION', description: 'Verify the current service and incident state after an action.', input: '{ incident_id }', output: 'Structured JSON' },
   ...['get_services','get_service_health','get_incident','get_metrics','get_logs','get_dependencies','get_deployment_history'].map(name => ({ name, category: 'OBSERVATION', description: `Retrieve structured ${name.replaceAll('_',' ')} from the simulated production environment.`, input: name === 'get_incident' ? '{ incident_id }' : name === 'get_services' ? 'none' : '{ service_id }', output: 'Structured JSON' })),
   ...['run_diagnostic','compare_metrics','get_incident_timeline','correlate_events'].map(name => ({ name, category: 'INVESTIGATION', description: `Run an evidence-based ${name.replaceAll('_',' ')} across incident telemetry.`, input: '{ service_id, incident_id }', output: 'Structured JSON' })),
   { name: 'propose_remediation', category: 'RECOMMENDATION', description: 'Generate a safe, human-reviewable mitigation recommendation for the active incident.', input: '{ incident_id }', output: 'Structured JSON' },
@@ -40,8 +44,16 @@ export const tools = [
   { name: 'verify_remediation', category: 'VERIFICATION', description: 'Verify the simulated service and incident state after remediation.', input: '{ incident_id }', output: 'Structured JSON' }
   ]
 
+const investigationFindings: Record<string, string[]> = {}
+let remediationExecuted = false
+
 export function getToolResult(name: string, args: Record<string, unknown> = {}) {
+  const incidentId = String(args.incident_id || 'INC-1042')
   const serviceId = String(args.service_id || args.service || 'payment-api')
+  if (name === 'get_active_incidents') return { incidents: [incident] }
+  if (name === 'get_incident_evidence') return incidentId === incident.id ? { incident, metrics, logs, timeline, deployment: deployments[0], findings: investigationFindings[incidentId] || [] } : { error: `Unknown incident: ${incidentId}`, valid_incident_ids: [incident.id] }
+  if (name === 'create_investigation_finding') { const finding = String(args.finding || '').trim(); if (!finding) return { error: 'finding is required' }; investigationFindings[incidentId] = [...(investigationFindings[incidentId] || []), finding]; return { incident_id: incidentId, finding, stored: true, findings: investigationFindings[incidentId] } }
+  if (name === 'verify_incident') return remediationExecuted ? { incident_id: incidentId, verified: true, service_status: 'healthy', error_rate: 0.6, latency_ms: 142, incident_status: 'mitigated', note: 'Simulated rollback verified.' } : { incident_id: incidentId, verified: true, service_status: 'degraded', incident_status: 'Investigating', note: 'No remediation has been executed.' }
   const svc = services.find(s => s.id === serviceId)
   if (name === 'get_services') return { services }
   if (name === 'get_service_health') return svc || { error: `Unknown service: ${serviceId}`, valid_service_ids: services.map(s => s.id) }
@@ -54,7 +66,7 @@ export function getToolResult(name: string, args: Record<string, unknown> = {}) 
   if (name === 'correlate_events' || name === 'run_diagnostic') return { finding: 'Likely connection pool saturation introduced by v2.7.3 under increased traffic.', confidence: 0.94, evidence: ['latency rose 3 minutes after deployment', 'database connections reached 93%', '5xx errors correlate with connection timeouts'], next_action: 'Review connection pooling change and roll back if approved by the incident commander.' }
   if (name === 'propose_remediation') return { incident_id: 'INC-1042', recommendation: 'Rollback payment-api v2.7.3', reason: 'Connection pooling configuration correlates with latency, 5xx errors, and 93% database connection utilization.', requires_human_approval: true, safe_action: 'rollback_payment_api' }
   if (name === 'approve_remediation') return { incident_id: 'INC-1042', approved: true, approved_by: 'operator', action: String(args.action || 'rollback_payment_api'), note: 'Human approval recorded; execution is now permitted.' }
-  if (name === 'execute_remediation') return args.approved === true ? { incident_id: 'INC-1042', action: 'rollback_payment_api', executed: true, result: 'payment-api v2.7.3 rollback simulated', state: 'mitigating' } : { error: 'Human approval is required before executing remediation.', requires_approval: true }
+  if (name === 'execute_remediation') { if (args.approved !== true || String(args.action || '') !== 'rollback_payment_api') return { error: 'Human approval is required before executing the supported remediation.', requires_approval: true, valid_action: 'rollback_payment_api' }; remediationExecuted = true; return { incident_id: 'INC-1042', action: 'rollback_payment_api', executed: true, result: 'payment-api v2.7.3 rollback simulated', state: 'mitigating' } }
   if (name === 'verify_remediation') return { incident_id: 'INC-1042', verified: true, service_status: 'healthy', error_rate: 0.6, latency_ms: 142, incident_status: 'mitigated', evidence: '5xx rate and latency returned to normal after simulated rollback.' }
   return { error: `Unknown tool: ${name}` }
 }
@@ -63,5 +75,5 @@ export const statusStyles: Record<Status, string> = { healthy: 'text-emerald-400
 export const statusDot: Record<Status, string> = { healthy: 'bg-emerald-400', degraded: 'bg-amber-300', warning: 'bg-orange-300', critical: 'bg-red-400' }
 export type Tool = (typeof tools)[number]
 
-export const toolDefinitions = tools.map(t => ({ name: t.name, title: t.name.replaceAll('_', ' '), description: t.description, inputSchema: { type: 'object', properties: t.input === 'none' ? {} : { service_id: { type: 'string', description: 'Service identifier' }, incident_id: { type: 'string', description: 'Incident identifier' }, action: { type: 'string', description: 'Approved safe action' }, approved: { type: 'boolean', description: 'Must be true after human approval' } }, additionalProperties: false } }))
+export const toolDefinitions = tools.map(t => { const properties = t.input === 'none' ? {} : { service_id: { type: 'string', description: 'Service identifier, for example payment-api' }, incident_id: { type: 'string', description: 'Incident identifier, for example INC-1042' }, action: { type: 'string', description: 'Approved action, must be rollback_payment_api' }, approved: { type: 'boolean', description: 'Must be true after human approval' }, finding: { type: 'string', description: 'Finding to store for operator review' } }; const required = t.name === 'get_active_incidents' ? [] : t.name === 'get_incident' || t.name === 'get_incident_evidence' || t.name === 'verify_incident' || t.name === 'propose_remediation' ? ['incident_id'] : t.name === 'create_investigation_finding' ? ['incident_id', 'finding'] : t.name === 'execute_remediation' ? ['incident_id', 'action', 'approved'] : []; return { name: t.name, title: t.name.replaceAll('_', ' '), description: t.description, inputSchema: { type: 'object', properties, required, additionalProperties: false } } })
 export const executeTool = (name: string, args: Record<string, unknown>) => getToolResult(name, args)
