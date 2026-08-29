@@ -33,8 +33,12 @@ export const deployments = [{ version: 'v2.7.3', service: 'payment-api', time: '
 
 export const tools = [
   ...['get_services','get_service_health','get_incident','get_metrics','get_logs','get_dependencies','get_deployment_history'].map(name => ({ name, category: 'OBSERVATION', description: `Retrieve structured ${name.replaceAll('_',' ')} from the simulated production environment.`, input: name === 'get_incident' ? '{ incident_id }' : name === 'get_services' ? 'none' : '{ service_id }', output: 'Structured JSON' })),
-  ...['run_diagnostic','compare_metrics','get_incident_timeline','correlate_events'].map(name => ({ name, category: 'INVESTIGATION', description: `Run an evidence-based ${name.replaceAll('_',' ')} across incident telemetry.`, input: '{ service_id, incident_id }', output: 'Structured JSON' }))
-]
+  ...['run_diagnostic','compare_metrics','get_incident_timeline','correlate_events'].map(name => ({ name, category: 'INVESTIGATION', description: `Run an evidence-based ${name.replaceAll('_',' ')} across incident telemetry.`, input: '{ service_id, incident_id }', output: 'Structured JSON' })),
+  { name: 'propose_remediation', category: 'RECOMMENDATION', description: 'Generate a safe, human-reviewable mitigation recommendation for the active incident.', input: '{ incident_id }', output: 'Structured JSON' },
+  { name: 'approve_remediation', category: 'HUMAN CONTROL', description: 'Record explicit operator approval for the proposed simulated rollback.', input: '{ incident_id, action }', output: 'Structured JSON' },
+  { name: 'execute_remediation', category: 'ACTION', description: 'Execute the approved, non-destructive simulated rollback and return resulting state.', input: '{ incident_id, action, approved }', output: 'Structured JSON' },
+  { name: 'verify_remediation', category: 'VERIFICATION', description: 'Verify the simulated service and incident state after remediation.', input: '{ incident_id }', output: 'Structured JSON' }
+  ]
 
 export function getToolResult(name: string, args: Record<string, unknown> = {}) {
   const serviceId = String(args.service_id || args.service || 'payment-api')
@@ -48,6 +52,10 @@ export function getToolResult(name: string, args: Record<string, unknown> = {}) 
   if (name === 'get_deployment_history') return { service: serviceId, deployments }
   if (name === 'get_incident_timeline') return { incident_id: 'INC-1042', timeline }
   if (name === 'correlate_events' || name === 'run_diagnostic') return { finding: 'Likely connection pool saturation introduced by v2.7.3 under increased traffic.', confidence: 0.94, evidence: ['latency rose 3 minutes after deployment', 'database connections reached 93%', '5xx errors correlate with connection timeouts'], next_action: 'Review connection pooling change and roll back if approved by the incident commander.' }
+  if (name === 'propose_remediation') return { incident_id: 'INC-1042', recommendation: 'Rollback payment-api v2.7.3', reason: 'Connection pooling configuration correlates with latency, 5xx errors, and 93% database connection utilization.', requires_human_approval: true, safe_action: 'rollback_payment_api' }
+  if (name === 'approve_remediation') return { incident_id: 'INC-1042', approved: true, approved_by: 'operator', action: String(args.action || 'rollback_payment_api'), note: 'Human approval recorded; execution is now permitted.' }
+  if (name === 'execute_remediation') return args.approved === true ? { incident_id: 'INC-1042', action: 'rollback_payment_api', executed: true, result: 'payment-api v2.7.3 rollback simulated', state: 'mitigating' } : { error: 'Human approval is required before executing remediation.', requires_approval: true }
+  if (name === 'verify_remediation') return { incident_id: 'INC-1042', verified: true, service_status: 'healthy', error_rate: 0.6, latency_ms: 142, incident_status: 'mitigated', evidence: '5xx rate and latency returned to normal after simulated rollback.' }
   return { error: `Unknown tool: ${name}` }
 }
 
@@ -55,5 +63,5 @@ export const statusStyles: Record<Status, string> = { healthy: 'text-emerald-400
 export const statusDot: Record<Status, string> = { healthy: 'bg-emerald-400', degraded: 'bg-amber-300', warning: 'bg-orange-300', critical: 'bg-red-400' }
 export type Tool = (typeof tools)[number]
 
-export const toolDefinitions = tools.map(t => ({ name: t.name, title: t.name.replaceAll('_', ' '), description: t.description, inputSchema: { type: 'object', properties: t.input === 'none' ? {} : { service_id: { type: 'string', description: 'Service identifier' }, incident_id: { type: 'string', description: 'Incident identifier' } } } }))
+export const toolDefinitions = tools.map(t => ({ name: t.name, title: t.name.replaceAll('_', ' '), description: t.description, inputSchema: { type: 'object', properties: t.input === 'none' ? {} : { service_id: { type: 'string', description: 'Service identifier' }, incident_id: { type: 'string', description: 'Incident identifier' }, action: { type: 'string', description: 'Approved safe action' }, approved: { type: 'boolean', description: 'Must be true after human approval' } }, additionalProperties: false } }))
 export const executeTool = (name: string, args: Record<string, unknown>) => getToolResult(name, args)

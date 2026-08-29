@@ -12,6 +12,8 @@ Observation: `get_services`, `get_service_health`, `get_incident`, `get_metrics`
 
 Investigation: `run_diagnostic`, `compare_metrics`, `get_incident_timeline`, `correlate_events`.
 
+Controlled response: `propose_remediation`, `approve_remediation`, `execute_remediation`, `verify_remediation`. Execution requires explicit human approval and is fully simulated.
+
 ## Human + agent collaboration
 
 A human opens INC-1042, an agent gathers correlated evidence through the tools, and the human reviews the evidence before approving an operational decision. The Agent Activity view shows real invocations from the browser WebMCP execution mechanism.
@@ -23,11 +25,11 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The simulated environment requires no credentials or environment variables.
+Open `http://localhost:3000`. The simulated environment requires no credentials or environment variables. The canonical demo scenario is INC-1042, Payment API degradation.
 
 ## Test WebMCP
 
-Use Chrome with WebMCP enabled, or a compatible browser agent. Open the WebMCP Tools page to confirm the 11 registered capabilities. Ask the agent to call `get_service_health` with `service_id: payment-api`, then inspect Agent Activity. On unsupported browsers the UI remains fully usable and the tool registry explains the browser bridge status.
+Use Chrome with WebMCP enabled, or a compatible browser agent. Open the WebMCP Tools page to confirm the registered capabilities. Try prompts such as “Investigate the active P1 incident,” “Why is the Payment API degraded?”, or “Check whether a recent deployment correlates with the incident.” Then inspect Agent Activity. To demonstrate human control, ask for a mitigation recommendation, approve the rollback in Investigation, execute the safe simulated action, and verify the resulting state. On unsupported browsers the UI remains fully usable and the tool registry explains the bridge status.
 
 ## Deployment
 
