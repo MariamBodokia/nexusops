@@ -8,10 +8,18 @@ type ModelContext = { getTools: () => Promise<RegisteredTool[]>; executeTool: (t
 type Result = Record<string, any>
 
 type Step = { label: string; tool: string; args: Record<string, unknown> }
+const normalizeToolResult = (result: unknown): unknown => {
+  if (typeof result !== 'string') return result
+  try { return JSON.parse(result) } catch { return result }
+}
+
 const steps: Step[] = [
   { label: 'Reading incident state', tool: 'get_incident', args: { incident_id: 'INC-1042' } },
   { label: 'Gathering incident evidence', tool: 'get_incident_evidence', args: { incident_id: 'INC-1042' } },
   { label: 'Reading incident timeline', tool: 'get_incident_timeline', args: { incident_id: 'INC-1042' } },
+  { label: 'Reading telemetry', tool: 'get_metrics', args: { service_id: 'payment-api' } },
+  { label: 'Reading structured logs', tool: 'get_logs', args: { service_id: 'payment-api' } },
+  { label: 'Reading deployment history', tool: 'get_deployment_history', args: { service_id: 'payment-api' } },
   { label: 'Correlating deployment and telemetry', tool: 'correlate_events', args: { service_id: 'payment-api', incident_id: 'INC-1042' } },
   { label: 'Running diagnostic', tool: 'run_diagnostic', args: { incident_id: 'INC-1042', service_id: 'payment-api' } },
 ]
@@ -19,7 +27,10 @@ const steps: Step[] = [
 async function callTool(ctx: ModelContext, name: string, args: Record<string, unknown>) {
   const registered = (await ctx.getTools()).find(tool => tool.name === name)
   if (!registered) throw new Error(`WebMCP tool “${name}” is not registered.`)
-  return await ctx.executeTool(registered, JSON.stringify(args))
+  const schema = registered.inputSchema
+  const properties = schema && typeof schema === 'object' && 'properties' in schema ? (schema as { properties?: Record<string, unknown> }).properties : undefined
+  const safeArgs = Object.fromEntries(Object.entries(args).filter(([key]) => !properties || key in properties))
+  return normalizeToolResult(await ctx.executeTool(registered, JSON.stringify(safeArgs)))
 }
 
 export default function LiveInvestigation() {
@@ -34,7 +45,10 @@ export default function LiveInvestigation() {
       if (typeof document === 'undefined' || !document.modelContext) throw new Error('WebMCP is unavailable. Open NexusOps in Chrome with WebMCP enabled.')
       const ctx = document.modelContext as unknown as ModelContext
       const active = await callTool(ctx, 'get_active_incidents', {})
-      if (!(active as Result)?.incidents?.some((item: Result) => item.id === 'INC-1042')) throw new Error('INC-1042 is not present in the active incident response.')
+      if (!active || typeof active !== 'object' || (active as Result).error) throw new Error('The active incident tool returned an invalid response.')
+      const activeIncidents = Array.isArray((active as Result).incidents) ? (active as Result).incidents : []
+      const requestedIncident = activeIncidents.find((item: Result) => item?.id === 'INC-1042')
+      if (!requestedIncident) throw new Error('INC-1042 was not returned by get_active_incidents.')
       const values: Result[] = []
       for (let i = 0; i < steps.length; i++) { setStep(i); const value = await callTool(ctx, steps[i].tool, steps[i].args); if (!value || typeof value !== 'object' || (value as Result).error) throw new Error(`${steps[i].tool} failed: ${(value as Result)?.error || 'malformed response'}`); values.push(value as Result) }
       setResult({ incident: values[0], evidence: values[1], timeline: values[2], correlation: values[3], diagnostic: values[4] }); setStep(steps.length)
