@@ -29,18 +29,23 @@ import {
 
 import {
   executeTool,
-  incident,
-  services,
-  statusDot,
-  statusStyles,
   toolDefinitions,
   tools,
+  statusDot,
+  statusStyles,
+  setToolExecutor,
+} from '@/lib/nexus-data'
+import {
   getActivity,
   subscribe,
-  type ActivityEntry,
-} from '@/lib/nexus-data'
+} from '@/lib/activity-store'
+import {
+  getIncident,
+  getServices
+} from '@/lib/data-access'
 
 import LiveInvestigation from '@/components/live-investigation'
+import { ActivityEntry, Status } from '@/lib/types'
 
 type Section =
   | 'Overview'
@@ -354,11 +359,7 @@ function CardTitle({
 function Badge({
   status,
 }: {
-  status:
-    | 'healthy'
-    | 'degraded'
-    | 'warning'
-    | 'critical'
+  status: Status
 }) {
   return (
     <span
@@ -413,7 +414,7 @@ function Spark({
               30 -
               ((point - min) /
                 (max - min || 1)) *
-                25
+              25
 
             return `${x},${y}`
           })
@@ -483,10 +484,14 @@ function Stat({
 function Overview({
   setSection,
   activityCount,
+  webmcpAvailable,
 }: {
   setSection: (section: Section) => void
   activityCount: number
+  webmcpAvailable: boolean
 }) {
+  const services = getServices();
+  const incident = getIncident('INC-1042');
   const counts = {
     healthy: services.filter(
       (service) =>
@@ -511,56 +516,57 @@ function Overview({
     <>
       <PageHeader
         eyebrow="Production / us-east-1"
-        title="Command center"
-        sub="Current operational health, active incidents, and agent activity across the production environment."
+        title="AI-assisted Production Operations"
+        sub="NexusOps provides an AI-native operations fabric powered by WebMCP for real-time incident investigation and response."
         action={
           <button
             type="button"
             onClick={() =>
               window.location.reload()
             }
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-[11px] font-semibold transition-colors hover:bg-accent"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm font-semibold transition-colors hover:bg-accent"
           >
-            <RefreshCw size={13} />
+            <RefreshCw size={14} />
             Refresh
           </button>
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
-          label="Environment health"
-          value="97.8%"
-          note="+0.4% from yesterday"
-          icon={<Gauge size={16} />}
-          good
+          label="WebMCP Status"
+          value={webmcpAvailable ? 'Active' : 'Unavailable'}
+          note={webmcpAvailable ? "Tools are available to agents" : "Investigation is disabled"}
+          icon={<Bot size={16} />}
+          good={webmcpAvailable}
+          alert={!webmcpAvailable}
         />
 
         <Stat
           label="Active incidents"
-          value="01"
-          note="P1 requires attention"
+          value={incident ? "1" : "0"}
+          note={incident ? "P1 requires attention" : "No active incidents"}
           icon={<AlertTriangle size={16} />}
-          alert
+          alert={!!incident}
         />
 
         <Stat
-          label="Services operational"
-          value={`${counts.healthy}/${services.length}`}
-          note={`${servicesNeedingAttention} need attention`}
+          label="Services requiring attention"
+          value={String(servicesNeedingAttention)}
+          note={`${counts.healthy} services are healthy`}
           icon={<Server size={16} />}
-          good
+          alert={servicesNeedingAttention > 0}
         />
 
         <Stat
-          label="Agent invocations"
+          label="Agent Activity"
           value={String(activityCount)}
           note={
             activityCount
-              ? 'WebMCP executions this session'
+              ? 'Tool executions this session'
               : 'No executions yet'
           }
-          icon={<Bot size={16} />}
+          icon={<Activity size={16} />}
         />
       </div>
 
@@ -573,7 +579,7 @@ function Overview({
                 onClick={() =>
                   setSection('Services')
                 }
-                className="text-[11px] font-medium text-accent-foreground hover:underline"
+                className="text-sm font-medium text-accent-foreground hover:underline"
               >
                 View inventory
                 <ArrowUpRight
@@ -583,7 +589,7 @@ function Overview({
               </button>
             }
           >
-            Service health
+            Service Health
           </CardTitle>
 
           <div className="divide-y divide-border">
@@ -598,13 +604,13 @@ function Overview({
                     className={[
                       'h-2 w-2 shrink-0 rounded-full',
                       statusDot[
-                        service.status
+                      service.status
                       ],
                     ].join(' ')}
                   />
 
                   <div className="min-w-0 w-40">
-                    <div className="truncate text-[12px] font-semibold">
+                    <div className="truncate text-sm font-semibold">
                       {service.name}
                     </div>
                   </div>
@@ -615,11 +621,11 @@ function Overview({
 
                   <div className="ml-auto hidden items-center gap-5 text-right sm:flex">
                     <div>
-                      <div className="text-[11px] font-semibold tabular-nums">
+                      <div className="text-sm font-semibold tabular-nums">
                         {service.latency} ms
                       </div>
 
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         latency
                       </div>
                     </div>
@@ -627,23 +633,23 @@ function Overview({
                     <Spark
                       points={
                         service.status ===
-                        'degraded'
+                          'degraded'
                           ? [
-                              12,
-                              13,
-                              17,
-                              25,
-                              36,
-                              48,
-                            ]
+                            12,
+                            13,
+                            17,
+                            25,
+                            36,
+                            48,
+                          ]
                           : [
-                              18,
-                              16,
-                              17,
-                              15,
-                              14,
-                              15,
-                            ]
+                            18,
+                            16,
+                            17,
+                            15,
+                            14,
+                            15,
+                          ]
                       }
                     />
                   </div>
@@ -652,34 +658,34 @@ function Overview({
           </div>
         </Card>
 
-        <div className="grid gap-6">
+        {incident && <div className="grid gap-6">
           <Card>
             <CardTitle
               meta={
-                <span className="text-[11px] font-medium text-muted-foreground">
+                <span className="text-sm font-medium text-muted-foreground">
                   {incident.started} UTC
                 </span>
               }
             >
-              Active incident
+              Active Incident
             </CardTitle>
 
             <div className="p-5">
               <div className="mb-3 flex items-center gap-2">
-                <span className="rounded-md bg-red-400/10 px-2 py-1 text-[10px] font-bold text-red-400">
+                <span className="rounded-md bg-red-400/10 px-2 py-1 text-xs font-bold text-red-400">
                   P1
                 </span>
 
-                <span className="font-mono text-[10px] text-muted-foreground">
+                <span className="font-mono text-xs text-muted-foreground">
                   {incident.id}
                 </span>
               </div>
 
-              <h3 className="text-[16px] font-bold tracking-tight">
+              <h3 className="text-lg font-bold tracking-tight">
                 {incident.title}
               </h3>
 
-              <p className="mt-1 text-[12px] text-muted-foreground">
+              <p className="mt-1 text-sm text-muted-foreground">
                 Payment API · investigating
               </p>
 
@@ -688,9 +694,9 @@ function Overview({
                 onClick={() =>
                   setSection('Investigation')
                 }
-                className="mt-5 flex w-full items-center justify-between rounded-lg border border-border px-3.5 py-3 text-[11px] font-semibold transition-colors hover:bg-accent"
+                className="mt-5 flex w-full items-center justify-between rounded-lg border border-border px-3.5 py-3 text-sm font-semibold transition-colors hover:bg-accent"
               >
-                Open investigation
+                Open Investigation
                 <ChevronRight size={14} />
               </button>
             </div>
@@ -698,7 +704,7 @@ function Overview({
 
           <Card>
             <CardTitle>
-              Recent events
+              Recent Events
             </CardTitle>
 
             <div className="space-y-5 p-5">
@@ -724,16 +730,16 @@ function Overview({
                     className="flex gap-3"
                     key={time}
                   >
-                    <span className="w-11 shrink-0 font-mono text-[10px] text-muted-foreground">
+                    <span className="w-11 shrink-0 font-mono text-sm text-muted-foreground">
                       {time}
                     </span>
 
                     <div className="min-w-0">
-                      <div className="text-[11px] font-semibold">
+                      <div className="text-sm font-semibold">
                         {title}
                       </div>
 
-                      <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                      <div className="mt-1 text-sm leading-5 text-muted-foreground">
                         {detail}
                       </div>
                     </div>
@@ -742,7 +748,7 @@ function Overview({
               )}
             </div>
           </Card>
-        </div>
+        </div>}
       </div>
     </>
   )
@@ -753,6 +759,7 @@ function Overview({
 /* -------------------------------------------------------------------------- */
 
 function Services() {
+  const services = getServices();
   return (
     <>
       <PageHeader
@@ -782,7 +789,7 @@ function Services() {
                   className={[
                     'h-2 w-2 shrink-0 rounded-full',
                     statusDot[
-                      service.status
+                    service.status
                     ],
                   ].join(' ')}
                 />
@@ -854,6 +861,9 @@ function Incidents({
 }: {
   setSection: (section: Section) => void
 }) {
+  const incident = getIncident('INC-1042');
+  if (!incident) return null;
+
   return (
     <>
       <PageHeader
@@ -945,7 +955,7 @@ function ToolsPage({
       <PageHeader
         eyebrow="WebMCP / agent interface"
         title="Agent-accessible tools"
-        sub="Operational capabilities exposed through document.modelContext. Compatible agents can discover and invoke these tools against the same operational state."
+        sub="Operational capabilities exposed to compatible agents. The investigation engine uses these same tools."
         action={
           <div className="flex items-center gap-2 rounded-lg border border-accent-foreground/20 bg-accent/30 px-3.5 py-2.5 text-[11px] font-medium text-accent-foreground">
             <span
@@ -964,88 +974,6 @@ function ToolsPage({
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Stat
-          label="Registered tools"
-          value={String(tools.length)}
-          note="Available to compatible agents"
-          icon={<Code2 size={16} />}
-          good
-        />
-
-        <Stat
-          label="Structured outputs"
-          value="JSON"
-          note="Tool contracts use schemas"
-          icon={<Box size={16} />}
-          good
-        />
-
-        <Stat
-          label="Execution model"
-          value="Browser"
-          note="WebMCP bridge on this page"
-          icon={<Globe2 size={16} />}
-        />
-      </div>
-
-      <Card>
-        <CardTitle
-          meta={
-            <span className="text-[11px] text-muted-foreground">
-              {tools.length} capabilities
-            </span>
-          }
-        >
-          WebMCP capability registry
-        </CardTitle>
-
-        <div className="grid md:grid-cols-2">
-          {tools.map((tool) => (
-            <div
-              className="border-b border-border p-5 md:[&:nth-child(even)]:border-l"
-              key={tool.name}
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-
-                  <code className="truncate font-mono text-[11px] font-semibold">
-                    {tool.name}
-                  </code>
-                </div>
-
-                <span className="shrink-0 rounded-md border border-border px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {tool.category}
-                </span>
-              </div>
-
-              <p className="mb-4 text-[11px] leading-5 text-muted-foreground">
-                {tool.description}
-              </p>
-
-              <div className="grid gap-2 text-[9px] text-muted-foreground">
-                <div>
-                  <span className="font-bold text-foreground">
-                    INPUT
-                  </span>{' '}
-                  <code className="font-mono">
-                    {tool.input}
-                  </code>
-                </div>
-
-                <div>
-                  <span className="font-bold text-foreground">
-                    OUTPUT
-                  </span>{' '}
-                  {tool.output}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
       <div className="mt-6 rounded-xl border border-accent-foreground/20 bg-accent/30 p-5">
         <div className="flex items-start gap-3">
           <Terminal
@@ -1059,15 +987,72 @@ function ToolsPage({
             </div>
 
             <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
-              NexusOps exposes operational capabilities
-              through document.modelContext. A compatible
-              agent can discover the registered tools, invoke
-              them, inspect structured responses, and reason
-              over the returned evidence.
+              These capabilities are exposed to compatible agents through{' '}
+              <code className="font-semibold text-foreground">document.modelContext.registerTool()</code>.
             </p>
           </div>
         </div>
       </div>
+
+      <Card className="mt-8">
+        <CardTitle
+          meta={
+            <span className="text-[11px] text-muted-foreground">
+              {tools.length} capabilities
+            </span>
+          }
+        >
+          WebMCP capability registry
+        </CardTitle>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3">
+          {toolDefinitions.map((tool) => (
+            <div
+              className="border-b border-border p-5 md:[&:nth-child(even)]:border-l"
+              key={tool.name}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+
+                  <code className="truncate font-mono text-sm font-semibold">
+                    {tool.name}
+                  </code>
+                </div>
+
+                <span className="shrink-0 rounded-md border border-border px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {tools.find(t => t.name === tool.name)?.category}
+                </span>
+              </div>
+
+              <p className="mb-4 text-sm leading-6 text-muted-foreground">
+                {tool.description}
+              </p>
+
+              <div className="space-y-3 text-xs text-muted-foreground">
+                <div className='font-mono'>
+                  <span className="font-sans font-bold text-foreground">
+                    INPUT
+                  </span>{' '}
+                  <pre className='inline'>{JSON.stringify(tool.inputSchema, null, 2)}</pre>
+                </div>
+                 <div className='font-mono'>
+                  <span className="font-sans font-bold text-foreground">
+                    OUTPUT
+                  </span>{' '}
+                  JSON
+                </div>
+                 <div>
+                  <span className="font-bold text-foreground">
+                    STATUS
+                  </span>{' '}
+                  <span className='text-emerald-400'>Available</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
     </>
   )
 }
@@ -1217,7 +1202,10 @@ export default function Page() {
         }
       ).modelContext
 
-      if (!modelContext) {
+      if (
+        !modelContext ||
+        typeof modelContext.registerTool !== 'function'
+      ) {
         return
       }
 
@@ -1262,12 +1250,7 @@ export default function Page() {
               definition.description,
             inputSchema:
               definition.inputSchema,
-            execute: async (
-              args: Record<
-                string,
-                unknown
-              > = {},
-            ) => {
+            execute: (args: Record<string, unknown> = {}) => {
               return executeTool(
                 definition.name,
                 args,
@@ -1325,6 +1308,7 @@ export default function Page() {
         <Overview
           setSection={setSection}
           activityCount={activity.length}
+          webmcpAvailable={webmcpAvailable}
         />
       )}
 
@@ -1338,9 +1322,7 @@ export default function Page() {
         />
       )}
 
-      {section === 'Investigation' && (
-        <LiveInvestigation />
-      )}
+      {section === 'Investigation' && <LiveInvestigation webmcpAvailable={webmcpAvailable} />}
 
       {section === 'Agent Activity' && (
         <ActivityPage

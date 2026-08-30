@@ -1,6 +1,18 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import { Inter, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
+
+const fontSans = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+})
+
+const fontMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-mono',
+})
 
 export const metadata: Metadata = {
   title: 'NexusOps — Enterprise Operations Command Center',
@@ -39,8 +51,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">
+    <html lang="en" className={`${fontSans.variable} ${fontMono.variable}`}>
+      <body className="font-sans antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

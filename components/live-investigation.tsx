@@ -1,1056 +1,567 @@
 'use client'
 
-import { useState } from 'react'
+import { useReducer, Reducer, useState } from 'react'
 import {
-  AlertTriangle,
-  Check,
-  ChevronRight,
-  Database,
-  Loader2,
-  Search,
-  Server,
-  X,
+    AlertTriangle,
+    Check,
+    Loader2,
+    Search,
+    ChevronDown,
+    X,
+    Clock,
+    FileText,
+    List,
+    TrendingUp,
+    Zap,
+    Target,
+    GitCommit,
+    Lightbulb,
+    ShieldCheck,
+    ThumbsUp,
+    ChevronRight,
+    Copy,
+    AlertCircle
 } from 'lucide-react'
+import { Investigation, Evidence, ToolExecution, TimelineEvent, Signal, Hypothesis } from '@/lib/types';
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+} from '@/components/ui/card';
+import { runInvestigation } from '@/lib/investigation-engine';
 
-type RegisteredTool = {
-  name: string
-  inputSchema?: Record<
-    string,
-    unknown
-  >
-}
+type InvestigationState = {
+    running: boolean;
+    error: string;
+    investigation: Investigation | null;
+    rawEvidence: Evidence[];
+    toolExecutions: ToolExecution[];
+    currentStep: string;
+};
 
-type ModelContext = {
-  getTools: () => Promise<
-    RegisteredTool[]
-  >
+type InvestigationAction =
+    | { type: 'START_INVESTIGATION' }
+    | { type: 'SET_ERROR'; payload: string }
+    | { type: 'ADD_RAW_EVIDENCE'; payload: Evidence }
+    | { type: 'ADD_TOOL_EXECUTION'; payload: ToolExecution }
+    | { type: 'SET_INVESTIGATION'; payload: Investigation }
+    | { type: 'SET_STEP'; payload: string }
+    | { type: 'RESET' };
 
-  executeTool: (
-    tool: RegisteredTool,
-    args: string,
-  ) => Promise<unknown>
-}
+const initialState: InvestigationState = {
+    running: false,
+    error: '',
+    investigation: null,
+    rawEvidence: [],
+    toolExecutions: [],
+    currentStep: '',
+};
 
-type Result = Record<
-  string,
-  any
->
-
-type Step = {
-  label: string
-  tool: string
-  args: Record<
-    string,
-    unknown
-  >
-}
-
-const steps: Step[] = [
-  {
-    label: 'Reading active incidents',
-    tool: 'get_active_incidents',
-    args: {},
-  },
-  {
-    label: 'Reading incident state',
-    tool: 'get_incident',
-    args: {
-      incident_id: 'INC-1042',
-    },
-  },
-  {
-    label: 'Gathering incident evidence',
-    tool: 'get_incident_evidence',
-    args: {
-      incident_id: 'INC-1042',
-    },
-  },
-  {
-    label: 'Reading incident timeline',
-    tool: 'get_incident_timeline',
-    args: {
-      incident_id: 'INC-1042',
-    },
-  },
-  {
-    label: 'Reading telemetry',
-    tool: 'get_metrics',
-    args: {
-      service_id: 'payment-api',
-    },
-  },
-  {
-    label: 'Comparing healthy baseline',
-    tool: 'compare_metrics',
-    args: {
-      service_id: 'payment-api',
-      incident_id: 'INC-1042',
-    },
-  },
-  {
-    label: 'Reading structured logs',
-    tool: 'get_logs',
-    args: {
-      service_id: 'payment-api',
-    },
-  },
-  {
-    label: 'Reading deployment history',
-    tool: 'get_deployment_history',
-    args: {
-      service_id: 'payment-api',
-    },
-  },
-  {
-    label: 'Inspecting dependencies',
-    tool: 'get_dependencies',
-    args: {
-      service_id: 'payment-api',
-    },
-  },
-  {
-    label: 'Checking service health',
-    tool: 'get_service_health',
-    args: {
-      service_id: 'payment-api',
-    },
-  },
-  {
-    label: 'Correlating events',
-    tool: 'correlate_events',
-    args: {
-      service_id: 'payment-api',
-      incident_id: 'INC-1042',
-    },
-  },
-  {
-    label: 'Running diagnostic',
-    tool: 'run_diagnostic',
-    args: {
-      service_id: 'payment-api',
-      incident_id: 'INC-1042',
-    },
-  },
-]
-
-const normalizeToolResult = (
-  result: unknown,
-): unknown => {
-  if (typeof result !== 'string') {
-    return result
-  }
-
-  try {
-    return JSON.parse(result)
-  } catch {
-    return result
-  }
-}
-
-async function callTool(
-  ctx: ModelContext,
-  name: string,
-  args: Record<
-    string,
-    unknown
-  >,
-) {
-  const registered = (
-    await ctx.getTools()
-  ).find(
-    tool => tool.name === name,
-  )
-
-  if (!registered) {
-    throw new Error(
-      `WebMCP tool "${name}" is not registered.`,
-    )
-  }
-
-  const schema =
-    registered.inputSchema
-
-  const properties =
-    schema &&
-    typeof schema === 'object' &&
-    'properties' in schema
-      ? (
-          schema as {
-            properties?: Record<
-              string,
-              unknown
-            >
-          }
-        ).properties
-      : undefined
-
-  const safeArgs =
-    Object.fromEntries(
-      Object.entries(args).filter(
-        ([key]) =>
-          !properties ||
-          key in properties,
-      ),
-    )
-
-  const response =
-    await ctx.executeTool(
-      registered,
-      JSON.stringify(
-        safeArgs,
-      ),
-    )
-
-  return normalizeToolResult(
-    response,
-  )
-}
-
-function numberFrom(
-  value: unknown,
-) {
-  const n = Number(value)
-
-  return Number.isFinite(n)
-    ? n
-    : null
-}
-
-function getLatestNumber(
-  values: unknown,
-): number | null {
-  if (
-    !Array.isArray(values) ||
-    values.length === 0
-  ) {
-    return null
-  }
-
-  return numberFrom(
-    values[values.length - 1],
-  )
-}
-
-function formatPercent(
-  value: number | null,
-) {
-  return value === null
-    ? '—'
-    : `${value}%`
-}
-
-function formatMs(
-  value: number | null,
-) {
-  return value === null
-    ? '—'
-    : `${value.toLocaleString()} ms`
-}
-
-export default function LiveInvestigation() {
-  const [running, setRunning] =
-    useState(false)
-
-  const [step, setStep] =
-    useState(-1)
-
-  const [error, setError] =
-    useState('')
-
-  const [
-    toolResults,
-    setToolResults,
-  ] = useState<
-    Record<string, Result>
-  >({})
-
-  const investigate = async () => {
-    setRunning(true)
-    setStep(0)
-    setError('')
-    setToolResults({})
-
-    try {
-      if (
-        typeof document ===
-          'undefined' ||
-        !document.modelContext
-      ) {
-        throw new Error(
-          'WebMCP is unavailable. Open NexusOps in a compatible browser with WebMCP enabled.',
-        )
-      }
-
-      const ctx =
-        document.modelContext as unknown as ModelContext
-
-      const results: Record<
-        string,
-        Result
-      > = {}
-
-      for (
-        let i = 0;
-        i < steps.length;
-        i++
-      ) {
-        setStep(i)
-
-        const current =
-          steps[i]
-
-        const value =
-          await callTool(
-            ctx,
-            current.tool,
-            current.args,
-          )
-
-        if (
-          !value ||
-          typeof value !==
-            'object'
-        ) {
-          throw new Error(
-            `${current.tool} returned an invalid response.`,
-          )
-        }
-
-        const result =
-          value as Result
-
-        if (result.error) {
-          throw new Error(
-            `${current.tool}: ${result.error}`,
-          )
-        }
-
-        results[
-          current.tool
-        ] = result
-
-        setToolResults({
-          ...results,
-        })
-      }
-
-      setStep(
-        steps.length,
-      )
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Investigation failed.',
-      )
-    } finally {
-      setRunning(false)
+function investigationReducer(state: InvestigationState, action: InvestigationAction): InvestigationState {
+    switch (action.type) {
+        case 'START_INVESTIGATION':
+            return { ...initialState, running: true, currentStep: 'Starting investigation...' };
+        case 'SET_ERROR':
+            return { ...state, error: action.payload, running: false, currentStep: 'Error' };
+        case 'ADD_RAW_EVIDENCE':
+            return { ...state, rawEvidence: [...state.rawEvidence, action.payload] };
+        case 'ADD_TOOL_EXECUTION':
+            return { ...state, toolExecutions: [...state.toolExecutions, action.payload] };
+        case 'SET_INVESTIGATION':
+            return { ...state, investigation: action.payload, running: false, currentStep: 'Investigation complete' };
+        case 'SET_STEP':
+            return { ...state, currentStep: action.payload };
+        case 'RESET':
+            return initialState;
+        default:
+            return state;
     }
-  }
-
-  const metricsResult =
-    toolResults.get_metrics
-
-  const deploymentResult =
-    toolResults.get_deployment_history
-
-  const logsResult =
-    toolResults.get_logs
-
-  const diagnostic =
-    toolResults.run_diagnostic
-
-  const correlation =
-    toolResults.correlate_events
-
-  const baseline =
-    toolResults.compare_metrics
-
-  const incidentResult =
-    toolResults.get_incident
-
-  const latency =
-    getLatestNumber(
-      metricsResult?.latency_ms,
-    )
-
-  const errorRate =
-    getLatestNumber(
-      metricsResult?.error_rate,
-    )
-
-  const dbConnections =
-    getLatestNumber(
-      metricsResult?.db_connections,
-    )
-
-  const requestRate =
-    getLatestNumber(
-      metricsResult?.request_rate,
-    )
-
-  const deployments =
-    deploymentResult?.deployments ??
-    []
-
-  const latestDeployment =
-    deployments[0]
-
-  const hasEvidence =
-    Boolean(metricsResult) ||
-    Boolean(logsResult) ||
-    Boolean(deploymentResult) ||
-    Boolean(correlation)
-
-  const causalSignals = [
-    {
-      label: 'Recent deployment',
-      value:
-        latestDeployment?.version ??
-        'No deployment returned',
-
-      detail: latestDeployment
-        ? `${latestDeployment.time} UTC · ${latestDeployment.change}`
-        : 'No deployment evidence was returned.',
-
-      icon: Server,
-
-      positive:
-        Boolean(
-          latestDeployment,
-        ),
-    },
-
-    {
-      label: 'Database pressure',
-      value:
-        formatPercent(
-          dbConnections,
-        ),
-
-      detail:
-        dbConnections !==
-        null
-          ? 'Latest database connection utilization'
-          : 'No database utilization metric returned.',
-
-      icon: Database,
-
-      positive:
-        dbConnections !==
-          null &&
-        dbConnections >= 80,
-    },
-
-    {
-      label: 'Latency',
-      value:
-        formatMs(latency),
-
-      detail:
-        baseline?.baseline
-          ?.latency_ms !==
-        undefined
-          ? `Baseline: ${baseline.baseline.latency_ms} ms`
-          : 'No baseline returned.',
-
-      icon: AlertTriangle,
-
-      positive:
-        latency !== null &&
-        latency > 500,
-    },
-
-    {
-      label: 'HTTP error rate',
-      value:
-        formatPercent(
-          errorRate,
-        ),
-
-      detail:
-        baseline?.baseline
-          ?.error_rate !==
-        undefined
-          ? `Baseline: ${baseline.baseline.error_rate}%`
-          : 'No baseline returned.',
-
-      icon: AlertTriangle,
-
-      positive:
-        errorRate !== null &&
-        errorRate > 5,
-    },
-  ]
-
-  return (
-    <>
-      <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div>
-          <div className="mb-2 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[.2em] text-accent-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent-foreground" />
-            Investigation / WebMCP
-          </div>
-
-          <h1 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
-            Payment API investigation
-          </h1>
-
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Gather production evidence through the tools registered
-            on this page. Findings shown below are derived from the
-            returned evidence.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={investigate}
-          disabled={running}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-        >
-          {running ? (
-            <Loader2
-              className="animate-spin"
-              size={14}
-            />
-          ) : (
-            <Search size={14} />
-          )}
-
-          {running
-            ? 'Investigation running'
-            : 'Investigate with WebMCP'}
-        </button>
-      </div>
-
-      {!running &&
-        !hasEvidence &&
-        !error && (
-          <div className="mb-6 rounded-lg border border-accent-foreground/20 bg-accent/30 p-5 text-sm text-muted-foreground">
-            <div className="font-medium text-foreground">
-              Ready for evidence collection
-            </div>
-
-            <p className="mt-1 text-xs leading-5">
-              NexusOps will discover the browser's registered
-              WebMCP tools and query the active incident, metrics,
-              logs, deployment history, dependencies, timeline and
-              diagnostic data.
-            </p>
-
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              No remediation is approved or executed by this
-              investigation.
-            </p>
-          </div>
-        )}
-
-      {error && (
-        <div
-          role="alert"
-          className="mb-6 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-4 text-sm text-red-300"
-        >
-          <X
-            size={16}
-            className="mt-0.5 shrink-0"
-          />
-
-          <div>
-            <div className="font-semibold">
-              Investigation could not complete
-            </div>
-
-            <div className="mt-1 text-xs text-red-200/80">
-              {error}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(running ||
-        hasEvidence) && (
-        <>
-          <section className="mb-6 rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <div>
-                <h2 className="text-sm font-semibold">
-                  Evidence-derived signals
-                </h2>
-
-                <p className="mt-1 text-xs text-muted-foreground">
-                  These values come from WebMCP tool responses.
-                </p>
-              </div>
-
-              <span className="rounded border border-accent-foreground/20 bg-accent/30 px-2 py-1 font-mono text-[10px] text-accent-foreground">
-                LIVE TOOL DATA
-              </span>
-            </div>
-
-            <div className="grid gap-0 md:grid-cols-2">
-              {causalSignals.map(
-                signal => {
-                  const Icon =
-                    signal.icon
-
-                  return (
-                    <div
-                      key={
-                        signal.label
-                      }
-                      className="border-b border-border p-5 md:[&:nth-child(even)]:border-l"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Icon
-                              size={14}
-                              className={
-                                signal.positive
-                                  ? 'text-amber-300'
-                                  : 'text-muted-foreground'
-                              }
-                            />
-
-                            <span className="text-sm font-semibold">
-                              {
-                                signal.label
-                              }
-                            </span>
-                          </div>
-
-                          <div className="mt-2 font-mono text-xl font-semibold">
-                            {
-                              signal.value
-                            }
-                          </div>
-                        </div>
-
-                        {signal.positive && (
-                          <span className="rounded-full bg-amber-300/10 px-2 py-1 text-[9px] font-semibold uppercase text-amber-300">
-                            signal
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                        {
-                          signal.detail
-                        }
-                      </p>
-                    </div>
-                  )
-                },
-              )}
-            </div>
-          </section>
-
-          {diagnostic && (
-            <section className="mb-6 rounded-lg border border-accent-foreground/20 bg-accent/20 p-5">
-              <div className="mb-4">
-                <div className="font-mono text-[10px] font-semibold uppercase tracking-[.18em] text-accent-foreground">
-                  Diagnostic output
-                </div>
-
-                <h2 className="mt-1 text-base font-semibold">
-                  Evidence returned by diagnostic tool
-                </h2>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Latency
-                  </div>
-
-                  <div className="mt-1 font-mono text-lg">
-                    {formatMs(
-                      numberFrom(
-                        diagnostic
-                          .diagnostic_signals
-                          ?.latency_peak_ms,
-                      ),
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Error rate
-                  </div>
-
-                  <div className="mt-1 font-mono text-lg">
-                    {formatPercent(
-                      numberFrom(
-                        diagnostic
-                          .diagnostic_signals
-                          ?.error_rate_peak_percent,
-                      ),
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    DB connections
-                  </div>
-
-                  <div className="mt-1 font-mono text-lg">
-                    {formatPercent(
-                      numberFrom(
-                        diagnostic
-                          .diagnostic_signals
-                          ?.database_connection_peak_percent,
-                      ),
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Timeout events
-                  </div>
-
-                  <div className="mt-1 font-mono text-lg">
-                    {diagnostic
-                      .diagnostic_signals
-                      ?.timeout_events ??
-                      '—'}
-                  </div>
-                </div>
-              </div>
-
-              {Array.isArray(
-                diagnostic.evidence,
-              ) && (
-                <div className="mt-5">
-                  <div className="mb-2 text-xs text-muted-foreground">
-                    Returned evidence
-                  </div>
-
-                  <ul className="space-y-2">
-                    {diagnostic.evidence.map(
-                      (
-                        item: string,
-                        index: number,
-                      ) => (
-                        <li
-                          className="flex gap-2 text-xs text-muted-foreground"
-                          key={`${item}-${index}`}
-                        >
-                          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-foreground" />
-                          {item}
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </div>
-              )}
-            </section>
-          )}
-
-          {incidentResult && (
-            <section className="mb-6 rounded-lg border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                <div>
-                  <h2 className="text-sm font-semibold">
-                    Incident state
-                  </h2>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Returned by get_incident.
-                  </p>
-                </div>
-
-                <span className="font-mono text-xs">
-                  {
-                    incidentResult.incident_id
-                  }
-                </span>
-              </div>
-
-              <div className="grid gap-4 p-5 sm:grid-cols-4">
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Severity
-                  </div>
-
-                  <div className="mt-1 font-mono text-sm text-red-400">
-                    {
-                      incidentResult.severity ??
-                      '—'
-                    }
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Status
-                  </div>
-
-                  <div className="mt-1 text-sm">
-                    {
-                      incidentResult.status ??
-                      '—'
-                    }
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Service
-                  </div>
-
-                  <div className="mt-1 font-mono text-sm">
-                    {
-                      incidentResult.service ??
-                      '—'
-                    }
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase text-muted-foreground">
-                    Request rate
-                  </div>
-
-                  <div className="mt-1 font-mono text-sm">
-                    {requestRate !==
-                    null
-                      ? `${requestRate.toLocaleString()} / min`
-                      : '—'}
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          <div className="grid gap-6 xl:grid-cols-[.8fr_1.2fr]">
-            <section className="rounded-lg border border-border bg-card">
-              <div className="border-b border-border px-5 py-4">
-                <div className="text-sm font-semibold">
-                  WebMCP investigation flow
-                </div>
-
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Each row represents an actual tool invocation.
-                </div>
-              </div>
-
-              <div className="divide-y divide-border">
-                {steps.map(
-                  (item, i) => (
-                    <div
-                      key={`${item.tool}-${i}`}
-                      className="flex items-center gap-3 px-5 py-4 text-xs"
-                    >
-                      <span
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                          step > i
-                            ? 'bg-emerald-400/15 text-emerald-400'
-                            : step === i &&
-                                running
-                              ? 'bg-accent text-accent-foreground'
-                              : 'bg-muted text-muted-foreground'
-                        }`}
-                      >
-                        {step > i ? (
-                          <Check size={13} />
-                        ) : (
-                          i + 1
-                        )}
-                      </span>
-
-                      <div>
-                        <div
-                          className={
-                            step >= i
-                              ? 'text-foreground'
-                              : 'text-muted-foreground'
-                          }
-                        >
-                          {
-                            item.label
-                          }
-                        </div>
-
-                        <code className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
-                          {
-                            item.tool
-                          }
-                        </code>
-                      </div>
-
-                      {step === i &&
-                        running && (
-                          <Loader2
-                            className="ml-auto animate-spin text-accent-foreground"
-                            size={13}
-                          />
-                        )}
-
-                      {step > i && (
-                        <ChevronRight
-                          className="ml-auto text-emerald-400"
-                          size={13}
-                        />
-                      )}
-                    </div>
-                  ),
-                )}
-              </div>
-            </section>
-
-            <section className="space-y-6">
-              <section className="rounded-lg border border-border bg-card">
-                <div className="flex items-center gap-2 border-b border-border px-5 py-4 text-sm font-semibold">
-                  <AlertTriangle
-                    size={15}
-                    className="text-amber-300"
-                  />
-                  Correlation output
-                </div>
-
-                {correlation ? (
-                  <div className="space-y-4 p-5">
-                    {Array.isArray(
-                      correlation.correlations,
-                    ) ? (
-                      correlation.correlations.map(
-                        (
-                          item: Result,
-                          index: number,
-                        ) => (
-                          <div
-                            key={`${item.type}-${index}`}
-                            className="rounded-md border border-border p-4"
-                          >
-                            <div className="font-mono text-[10px] uppercase tracking-wider text-accent-foreground">
-                              {String(
-                                item.type,
-                              ).replaceAll(
-                                '_',
-                                ' ',
-                              )}
-                            </div>
-
-                            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-5 text-muted-foreground">
-                              {JSON.stringify(
-                                item,
-                                null,
-                                2,
-                              )}
-                            </pre>
-                          </div>
-                        ),
-                      )
-                    ) : (
-                      <pre className="overflow-x-auto whitespace-pre-wrap p-5 font-mono text-[10px] text-muted-foreground">
-                        {JSON.stringify(
-                          correlation,
-                          null,
-                          2,
-                        )}
-                      </pre>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-5 text-xs text-muted-foreground">
-                    Waiting for correlation output…
-                  </div>
-                )}
-              </section>
-
-              {logsResult && (
-                <section className="rounded-lg border border-border bg-card">
-                  <div className="border-b border-border px-5 py-4 text-sm font-semibold">
-                    Returned log evidence
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <div className="min-w-[600px] divide-y divide-border">
-                      {(
-                        logsResult.logs ??
-                        []
-                      ).map(
-                        (
-                          entry: string[],
-                          index: number,
-                        ) => (
-                          <div
-                            key={`${entry[0]}-${index}`}
-                            className="grid grid-cols-[70px_65px_1fr_1fr] gap-3 px-5 py-3 font-mono text-[11px]"
-                          >
-                            <span className="text-muted-foreground">
-                              {
-                                entry[0]
-                              }
-                            </span>
-
-                            <span
-                              className={
-                                entry[1] ===
-                                'ERROR'
-                                  ? 'text-red-400'
-                                  : entry[1] ===
-                                      'WARN'
-                                    ? 'text-amber-300'
-                                    : 'text-emerald-400'
-                              }
-                            >
-                              {
-                                entry[1]
-                              }
-                            </span>
-
-                            <span>
-                              {
-                                entry[2]
-                              }
-                            </span>
-
-                            <span className="text-muted-foreground">
-                              {
-                                entry[3]
-                              }
-                            </span>
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              <section className="rounded-lg border border-border bg-card">
-                <div className="border-b border-border px-5 py-4 text-sm font-semibold">
-                  Investigation boundary
-                </div>
-
-                <div className="p-5">
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    This investigation only gathers evidence and
-                    analyzes returned telemetry. It does not approve,
-                    execute, or verify remediation.
-                  </p>
-
-                  <div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/5 p-3 text-xs text-emerald-400">
-                    <Check size={14} />
-                    Human approval remains required for remediation.
-                  </div>
-                </div>
-              </section>
-            </section>
-          </div>
-        </>
-      )}
-    </>
-  )
 }
 
-declare global {
-  interface Document {
-    modelContext?: ModelContext
-  }
+function ToolExecutionTrace({ executions, running }: { executions: ToolExecution[], running: boolean }) {
+    const resultSummary = (result: any) => {
+        if (Array.isArray(result)) return `Returned ${result.length} items`;
+        if (typeof result === 'object' && result !== null) {
+            const keys = Object.keys(result);
+            if (keys.includes('deployments')) return `Returned ${result.deployments.length} deployments`;
+            if (keys.includes('logs')) return `Returned ${result.logs.length} log events`;
+            if (keys.includes('service') && keys.includes('window')) return `Returned metrics for ${result.service}`;
+            return `Returned object with keys: ${keys.join(', ')}`;
+        }
+        return 'Returned value';
+    }
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>WebMCP Execution Trace</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                {executions.length === 0 && !running && (
+                    <p className="text-sm text-muted-foreground">Run an investigation to see the tool execution trace.</p>
+                )}
+                {executions.map((exec: ToolExecution) => (
+                    <div key={exec.id} className="flex items-start gap-4">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background">
+                            {exec.success ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
+                        </div>
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                                <span className="font-mono text-sm font-semibold">{exec.toolName}</span>
+                                <span className="text-xs text-muted-foreground">{exec.duration} ms</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                {exec.success ? resultSummary(exec.result) : `Failed: ${exec.result}`}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+                {running && executions.length === 0 && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="animate-spin" size={14} />
+                        <span>Waiting for tool executions...</span>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function InvestigationSummaryCard({ investigation }: { investigation: Investigation }) {
+    const { summary } = investigation;
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Investigation Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                    <List size={16} className="text-muted-foreground" />
+                    <span><span className="font-bold">{summary.toolCount}</span> tools executed</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <FileText size={16} className="text-muted-foreground" />
+                    <span><span className="font-bold">{summary.evidenceSources.length}</span> evidence sources</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Clock size={16} className="text-muted-foreground" />
+                    <span><span className="font-bold">{(summary.durationMs / 1000).toFixed(2)}s</span> duration</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span className="font-bold capitalize">{summary.status}</span>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function TimelineCard({ timeline }: { timeline: TimelineEvent[] }) {
+    const getIcon = (type: TimelineEvent['type']) => {
+        switch (type) {
+            case 'deployment': return <GitCommit size={14} />;
+            case 'incident_start': return <AlertCircle size={14} />;
+            case 'log_error': return <FileText size={14} />;
+            case 'metric_anomaly': return <Zap size={14} />;
+            default: return <ChevronRight size={14} />;
+        }
+    }
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Timeline</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {timeline.map((event, index) => (
+                    <div key={index} className="flex items-start gap-3">
+                        <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-full bg-background text-muted-foreground">
+                            {getIcon(event.type)}
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-sm font-semibold">{event.description}</p>
+                            <p className="text-xs text-muted-foreground">
+                                <span className="font-mono">{event.time}</span> • {event.source}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+            </CardContent>
+        </Card>
+    );
+}
+
+function SignalAnalysisCard({ signals }: { signals: Signal[] }) {
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Signal Analysis</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                    <div className="font-semibold">Metric</div>
+                    <div className="text-right font-semibold">Before</div>
+                    <div className="text-right font-semibold">After</div>
+                    <div className="text-right font-semibold">Change</div>
+                </div>
+                <div className="mt-2 space-y-3">
+                    {signals.map(signal => (
+                        <div key={signal.metric} className="grid grid-cols-4 items-center gap-x-4 text-sm">
+                            <div className="font-semibold">{signal.metric}</div>
+                            <div className="text-right font-mono text-muted-foreground">{signal.valueBefore} {signal.unit}</div>
+                            <div className="text-right font-mono font-bold">{signal.valueAfter} {signal.unit}</div>
+                            <div className={`text-right font-semibold ${signal.change.startsWith('+') ? 'text-red-500' : 'text-green-500'}`}>
+                                {signal.change}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function CrossSourceCorrelationCard({ investigation }: { investigation: Investigation }) {
+    if (!investigation.rootCause) return null;
+    const { rawEvidence, rootCause, hypotheses } = investigation;
+    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
+    if (!rootHypothesis) return null;
+
+    const points = rootHypothesis.supportingEvidenceIds
+        .map(id => rawEvidence.find(e => e.id === id))
+        .filter((e): e is Evidence => !!e)
+        .map(e => ({
+            id: e.id,
+            description: e.description,
+            type: e.type,
+        }));
+
+    const getIcon = (type: string) => {
+        switch (type) {
+            case 'Deployment': return <GitCommit size={16} />;
+            case 'Log': return <FileText size={16} />;
+            case 'Metrics': return <TrendingUp size={16} />;
+            case 'Incident': return <AlertCircle size={16} />;
+            default: return <Zap size={16} />;
+        }
+    }
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Cross-Source Correlation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+                {points.map((point, index) => (
+                    <div key={point.id} className="flex flex-col items-center">
+                        <div className="flex w-full items-center gap-3 rounded-md bg-background p-3 text-sm">
+                            <div className="text-muted-foreground">{getIcon(point.type)}</div>
+                            <span className="flex-1">{point.description}</span>
+                        </div>
+                        {index < points.length - 1 && (
+                            <ChevronDown size={20} className="my-1 text-muted-foreground" />
+                        )}
+                    </div>
+                ))}
+            </CardContent>
+        </Card>
+    );
+}
+
+function HypothesesCard({ hypotheses }: { hypotheses: Hypothesis[] }) {
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Hypotheses</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {hypotheses.map(h => (
+                    <div key={h.id}>
+                        <div className="flex items-center justify-between">
+                            <p className="font-semibold text-sm">{h.title}</p>
+                            <span className="text-xs font-bold">{h.score}%</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{h.description}</p>
+                        <div className="mt-2 h-1.5 w-full rounded-full bg-background">
+                            <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${h.score}%` }} />
+                        </div>
+                    </div>
+                ))}
+            </CardContent>
+        </Card>
+    );
+}
+
+function RootCauseAssessmentCard({ investigation }: { investigation: Investigation }) {
+    if (!investigation.rootCause) return null;
+    const { rootCause, hypotheses } = investigation;
+    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
+    if (!rootHypothesis) return null;
+
+    return (
+        <Card className="bg-gradient-to-br from-background to-accent/30">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                    <Target size={18} />
+                    Root Cause Assessment
+                </CardTitle>
+                <CardDescription>{rootHypothesis.title}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="mb-4 text-sm">
+                    {rootHypothesis.description}
+                </div>
+                <div className="text-sm font-semibold mb-1">Confidence</div>
+                <div className="flex items-center gap-2">
+                    <div className="h-2 flex-1 rounded-full bg-background/50">
+                        <div
+                            className="h-2 rounded-full bg-green-500"
+                            style={{ width: `${rootCause.confidence}%` }}
+                        />
+                    </div>
+                    <span className="text-sm font-bold">{rootCause.confidence}%</span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+                    <div className="flex items-center gap-2">
+                        <Check size={14} className="text-green-500" />
+                        <span>{rootCause.supportingEvidenceCount} supporting evidence</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <X size={14} className="text-red-500" />
+                        <span>{rootCause.contradictingEvidenceCount} contradictions</span>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function WhyCard({ investigation }: { investigation: Investigation }) {
+    const [open, setOpen] = useState(false);
+    if (!investigation.rootCause) return null;
+    const { rawEvidence, rootCause, hypotheses } = investigation;
+    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
+    if (!rootHypothesis) return null;
+
+    const evidencePoints = rootHypothesis.supportingEvidenceIds
+        .map(id => rawEvidence.find(e => e.id === id))
+        .filter((e): e is Evidence => !!e);
+
+    return (
+        <Card>
+            <CardHeader onClick={() => setOpen(!open)} className="cursor-pointer">
+                <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Lightbulb size={18} />
+                        Why this hypothesis?
+                    </div>
+                    <ChevronDown size={20} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+                </CardTitle>
+            </CardHeader>
+            {open && (
+                <CardContent>
+                    <ul className="space-y-2 text-sm list-disc pl-5">
+                        {evidencePoints.map(e => <li key={e.id}>{e.description}</li>)}
+                    </ul>
+                </CardContent>
+            )}
+        </Card>
+    );
+}
+
+function RecommendationCard({ investigation }: { investigation: Investigation }) {
+    if (!investigation.recommendation) return null;
+    const { recommendation } = investigation;
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                    <ThumbsUp size={18} />
+                    Recommended Next Step
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <p className="font-semibold">{recommendation.title}</p>
+                <p className="text-sm text-muted-foreground mt-1 mb-4">{recommendation.action}</p>
+                <div className="rounded-lg border border-yellow-400/30 bg-yellow-400/10 p-3 text-center text-xs font-semibold text-yellow-300">
+                    HUMAN APPROVAL REQUIRED
+                </div>
+            </CardContent>
+        </Card>
+    )
+}
+
+function RawDataCard({ executions }: { executions: ToolExecution[] }) {
+    const [open, setOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const copyToClipboard = () => {
+        navigator.clipboard.writeText(JSON.stringify(executions.map(e => e.result), null, 2));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <Card>
+            <CardHeader onClick={() => setOpen(!open)} className="cursor-pointer">
+                <CardTitle className="flex items-center justify-between">
+                    Raw Tool Responses
+                    <ChevronDown size={20} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+                </CardTitle>
+            </CardHeader>
+            {open && (
+                <CardContent>
+                    <button
+                        onClick={copyToClipboard}
+                        className="mb-2 flex items-center gap-2 rounded-md bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
+                    >
+                        {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                        {copied ? 'Copied!' : 'Copy JSON'}
+                    </button>
+                    <pre className="text-xs bg-background p-4 rounded-md overflow-x-auto">
+                        {JSON.stringify(executions.map(e => ({ tool: e.toolName, result: e.result })), null, 2)}
+                    </pre>
+                </CardContent>
+            )}
+        </Card>
+    );
+}
+
+export default function LiveInvestigation({ webmcpAvailable }: { webmcpAvailable: boolean }) {
+    const [state, dispatch] = useReducer(investigationReducer, initialState);
+    const { running, error, investigation, toolExecutions, currentStep } = state;
+
+    const investigate = async () => {
+        dispatch({ type: 'START_INVESTIGATION' });
+
+        const onStep = (step: string) => dispatch({ type: 'SET_STEP', payload: step });
+        const onRawEvidence = (evidence: Evidence) => dispatch({ type: 'ADD_RAW_EVIDENCE', payload: evidence });
+        const onToolExecution = (execution: ToolExecution) => dispatch({ type: 'ADD_TOOL_EXECUTION', payload: execution });
+
+        try {
+            const result = await runInvestigation('INC-1042', onStep, onRawEvidence, onToolExecution);
+            dispatch({ type: 'SET_INVESTIGATION', payload: result });
+        } catch (e) {
+            dispatch({
+                type: 'SET_ERROR', payload: e instanceof Error
+                    ? e.message
+                    : 'An unknown error occurred during investigation.'
+            });
+        }
+    }
+
+    return (
+        <>
+            <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+                <div>
+                    <div className="mb-2 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[.2em] text-accent-foreground">
+                        <span className="h-1.5 w-1.5 rounded-full bg-accent-foreground" />
+                        Investigation / Engine
+                    </div>
+
+                    <h1 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
+                        INC-1042: Payment API Degradation
+                    </h1>
+
+                    <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                        The investigation engine will invoke tools to gather and correlate evidence, then produce a root cause analysis.
+                    </p>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={investigate}
+                    disabled={running || !webmcpAvailable}
+                    className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                >
+                    {running ? (
+                        <Loader2
+                            className="animate-spin"
+                            size={14}
+                        />
+                    ) : (
+                        <Search size={14} />
+                    )}
+
+                    {running ? currentStep : 'Run Investigation'}
+                </button>
+            </div>
+
+            {!webmcpAvailable && (
+                <div className="mb-6 flex items-start gap-3 rounded-lg border border-yellow-400/30 bg-yellow-400/5 p-4 text-sm text-yellow-300">
+                    <AlertTriangle
+                        size={16}
+                        className="mt-0.5 shrink-0"
+                    />
+                    <div>
+                        <div className="font-semibold">
+                           WebMCP unavailable
+                        </div>
+                        <div className="mt-1 text-xs text-yellow-200/80">
+                           Investigation requires an active WebMCP bridge.
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
+            {error && (
+                <div
+                    role="alert"
+                    className="mb-6 flex items-start gap-3 rounded-lg border border-red-400/30 bg-red-400/5 p-4 text-sm text-red-300"
+                >
+                    <X
+                        size={16}
+                        className="mt-0.5 shrink-0"
+                    />
+
+                    <div>
+                        <div className="font-semibold">
+                            Investigation could not complete
+                        </div>
+
+                        <div className="mt-1 text-xs text-red-200/80">
+                            {error}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+                <div className="lg:col-span-1 space-y-8">
+                    {investigation && <InvestigationSummaryCard investigation={investigation} />}
+                    <ToolExecutionTrace executions={toolExecutions} running={running} />
+                    {investigation && <RawDataCard executions={toolExecutions} />}
+                </div>
+
+                <div className="lg:col-span-2 space-y-8">
+                    {investigation && (
+                        <>
+                           <RootCauseAssessmentCard investigation={investigation} />
+                           <WhyCard investigation={investigation} />
+                           <RecommendationCard investigation={investigation} />
+                           <TimelineCard timeline={investigation.timeline} />
+                           <SignalAnalysisCard signals={investigation.signals} />
+                           {investigation.correlations && investigation.correlations.length > 0 && (
+                               <CrossSourceCorrelationCard investigation={investigation} />
+                           )}
+                           <HypothesesCard hypotheses={investigation.hypotheses} />
+                        </>
+                    )}
+                    {running && !investigation && (
+                         <Card>
+                            <CardContent className="flex flex-col items-center justify-center p-12 text-center">
+                                <Loader2 className="animate-spin text-muted-foreground mb-4" size={24} />
+                                <p className="font-semibold">{currentStep}</p>
+                                <p className="text-sm text-muted-foreground">Analyzing evidence...</p>
+                            </CardContent>
+                        </Card>
+                    )}
+                </div>
+            </div>
+        </>
+    )
 }
