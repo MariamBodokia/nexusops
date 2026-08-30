@@ -1,8 +1,5 @@
-
 @import 'tailwindcss';
-
 @import 'tw-animate-css';
-
 @import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
@@ -28,32 +25,49 @@
   --color-ring: var(--ring);
   --font-sans: 'Geist', 'Geist Fallback';
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
-  --radius-lg: 0.5rem;
-  --radius-md: 0.4rem;
+  --radius-lg: 0.625rem;
+  --radius-md: 0.45rem;
   --radius-sm: 0.3rem;
 }
 
 :root {
   color-scheme: dark;
-  --background: oklch(0.13 0.025 255);
-  --foreground: oklch(0.93 0.02 220);
-  --card: oklch(0.17 0.025 255);
-  --card-foreground: oklch(0.93 0.02 220);
-  --popover: oklch(0.16 0.025 255);
-  --popover-foreground: oklch(0.93 0.02 220);
+
+  --background: oklch(0.115 0.018 255);
+  --foreground: oklch(0.94 0.015 220);
+
+  --card: oklch(0.155 0.02 255);
+  --card-foreground: oklch(0.94 0.015 220);
+
+  --popover: oklch(0.15 0.02 255);
+  --popover-foreground: oklch(0.94 0.015 220);
+
   --primary: oklch(0.88 0.02 220);
-  --primary-foreground: oklch(0.14 0.025 255);
-  --secondary: oklch(0.22 0.025 255);
-  --secondary-foreground: oklch(0.9 0.02 220);
-  --muted: oklch(0.21 0.025 255);
-  --muted-foreground: oklch(0.62 0.03 225);
-  --accent: oklch(0.24 0.035 220);
-  --accent-foreground: oklch(0.78 0.16 195);
-  --destructive: oklch(0.68 0.18 25);
-  --border: oklch(0.29 0.035 245);
-  --input: oklch(0.25 0.03 245);
+  --primary-foreground: oklch(0.12 0.02 255);
+
+  --secondary: oklch(0.205 0.022 255);
+  --secondary-foreground: oklch(0.9 0.015 220);
+
+  --muted: oklch(0.195 0.022 255);
+  --muted-foreground: oklch(0.62 0.025 225);
+
+  --accent: oklch(0.215 0.035 220);
+  --accent-foreground: oklch(0.79 0.15 195);
+
+  --destructive: oklch(0.65 0.19 25);
+
+  --border: oklch(0.27 0.028 245);
+  --input: oklch(0.235 0.027 245);
   --ring: oklch(0.7 0.12 195);
+
+  --chart-1: #22d3ee;
   --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+
+  --sidebar: oklch(0.125 0.02 255);
+  --sidebar-foreground: oklch(0.9 0.015 220);
 }
 
 * {
@@ -62,16 +76,54 @@
 
 html {
   background: var(--background);
+  min-height: 100%;
 }
 
 body {
   @apply bg-background text-foreground font-sans antialiased;
+  min-height: 100vh;
 }
 
-button {
+button,
+[role='button'] {
   cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
 }
 
 ::selection {
   background: oklch(0.7 0.12 195 / 0.25);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.025 245);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.4 0.025 245);
+}
+
+input,
+textarea,
+select {
+  outline: none;
+}
+
+@media (max-width: 1023px) {
+  body {
+    overflow-x: hidden;
+  }
 }
