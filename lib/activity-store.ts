@@ -64,7 +64,7 @@ const summarize = (name: string, result: Record<string, unknown>) => {
     return 'Structured result returned';
 };
 
-export const recordActivity = (name: string, args: Record<string, unknown>, result: Record<string, unknown>) => {
+export const recordActivity = (name: string, args: Record<string, unknown>, result: Record<string, unknown>, duration = 0) => {
   const failed = Boolean(result.error) || result.success === false;
 
   activity = [
@@ -75,6 +75,7 @@ export const recordActivity = (name: string, args: Record<string, unknown>, resu
       args: Object.values(args).join(' ') || '—',
       success: !failed,
       summary: summarize(name, result),
+      duration,
     },
     ...activity,
   ].slice(0, 50);

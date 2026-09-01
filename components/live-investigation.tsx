@@ -20,7 +20,10 @@ import {
     ThumbsUp,
     ChevronRight,
     Copy,
-    AlertCircle
+    AlertCircle,
+    User,
+    Bot,
+    Play,
 } from 'lucide-react'
 import { Investigation, Evidence, ToolExecution, TimelineEvent, Signal, Hypothesis } from '@/lib/types';
 import {
@@ -31,6 +34,7 @@ import {
     CardDescription,
 } from '@/components/ui/card';
 import { runInvestigation } from '@/lib/investigation-engine';
+import { executeTool } from '@/lib/nexus-data';
 
 type InvestigationState = {
     running: boolean;
@@ -371,9 +375,57 @@ function WhyCard({ investigation }: { investigation: Investigation }) {
     );
 }
 
-function RecommendationCard({ investigation }: { investigation: Investigation }) {
-    if (!investigation.recommendation) return null;
+function LifecycleTag({ role, label }: { role: 'AGENT' | 'HUMAN' | 'ACTION' | 'VERIFICATION'; label: string }) {
+    const styles: Record<typeof role, string> = {
+        AGENT: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+        HUMAN: 'border-yellow-400/30 bg-yellow-400/10 text-yellow-300',
+        ACTION: 'border-red-400/30 bg-red-400/10 text-red-300',
+        VERIFICATION: 'border-green-400/30 bg-green-400/10 text-green-300',
+    };
+    const icons: Record<typeof role, React.ReactNode> = {
+        AGENT: <Bot size={11} />,
+        HUMAN: <User size={11} />,
+        ACTION: <Zap size={11} />,
+        VERIFICATION: <ShieldCheck size={11} />,
+    };
+    return (
+        <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${styles[role]}`}>
+            {icons[role]}
+            {label}
+        </span>
+    );
+}
+
+function RemediationPanel({ investigation, webmcpAvailable }: { investigation: Investigation; webmcpAvailable: boolean }) {
     const { recommendation } = investigation;
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const [proposal, setProposal] = useState<any>(null);
+    const [approval, setApproval] = useState<any>(null);
+    const [execution, setExecution] = useState<any>(null);
+    const [verification, setVerification] = useState<any>(null);
+
+    if (!recommendation) return null;
+
+    const run = async (name: string, args: Record<string, unknown>, onDone: (result: any) => void) => {
+        setBusy(true);
+        setError('');
+        try {
+            const result = await executeTool(name, args);
+            if (result?.error || result?.success === false) {
+                setError(String(result.error || result.reason || 'Tool execution failed'));
+            }
+            onDone(result);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const approved = Boolean(approval?.approved);
+    const executed = Boolean(execution?.success);
+    const verified = Boolean(verification?.success);
 
     return (
         <Card>
@@ -382,13 +434,109 @@ function RecommendationCard({ investigation }: { investigation: Investigation })
                     <ThumbsUp size={18} />
                     Recommended Next Step
                 </CardTitle>
+                <CardDescription>
+                    Agent proposes &rarr; human approves &rarr; controlled action executes &rarr; recovery is verified.
+                </CardDescription>
             </CardHeader>
-            <CardContent>
-                <p className="font-semibold">{recommendation.title}</p>
-                <p className="text-sm text-muted-foreground mt-1 mb-4">{recommendation.action}</p>
-                <div className="rounded-lg border border-yellow-400/30 bg-yellow-400/10 p-3 text-center text-xs font-semibold text-yellow-300">
-                    HUMAN APPROVAL REQUIRED
+            <CardContent className="space-y-5">
+                <div>
+                    <p className="font-semibold">{recommendation.title}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{recommendation.action}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{recommendation.reason}</p>
                 </div>
+
+                {error && (
+                    <div className="rounded-lg border border-red-400/30 bg-red-400/5 p-3 text-xs text-red-300">{error}</div>
+                )}
+
+                {/* Step 1: agent proposes remediation via the real propose_remediation tool */}
+                <div className="rounded-lg border border-border p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                        <LifecycleTag role="AGENT" label="Recommend" />
+                        {proposal && <Check size={14} className="text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Agent calls <code className="font-mono">propose_remediation</code> to generate a reviewable recommendation.</p>
+                    <button
+                        type="button"
+                        disabled={busy || !webmcpAvailable || Boolean(proposal)}
+                        onClick={() => run('propose_remediation', { incident_id: investigation.incidentId }, setProposal)}
+                        className="inline-flex items-center gap-2 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground disabled:opacity-50"
+                    >
+                        {busy && !proposal ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                        Propose remediation
+                    </button>
+                    {proposal?.rationale && (
+                        <ul className="mt-3 space-y-1 text-xs text-muted-foreground list-disc pl-5">
+                            {proposal.rationale.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                        </ul>
+                    )}
+                </div>
+
+                {/* Step 2: explicit human approval via approve_remediation */}
+                <div className="rounded-lg border border-border p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                        <LifecycleTag role="HUMAN" label="Approve" />
+                        {approved && <Check size={14} className="text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">A human operator explicitly approves the rollback before anything executes.</p>
+                    <button
+                        type="button"
+                        disabled={busy || !webmcpAvailable || !proposal || approved}
+                        onClick={() => run('approve_remediation', { incident_id: investigation.incidentId, action: proposal?.action }, setApproval)}
+                        className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                        {busy && proposal && !approval ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                        Approve rollback
+                    </button>
+                </div>
+
+                {/* Step 3: controlled action, blocked server-side unless approval was recorded */}
+                <div className="rounded-lg border border-border p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                        <LifecycleTag role="ACTION" label="Execute" />
+                        {executed && <Check size={14} className="text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Executes the approved, non-destructive simulated rollback via <code className="font-mono">execute_remediation</code>.</p>
+                    <button
+                        type="button"
+                        disabled={busy || !webmcpAvailable || !approved || executed}
+                        onClick={() => run('execute_remediation', { incident_id: investigation.incidentId, action: proposal?.action, approved: true }, setExecution)}
+                        className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                        {busy && approved && !execution ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                        Execute rollback
+                    </button>
+                    {execution?.success && (
+                        <p className="mt-2 text-xs text-green-400">Restored {execution.service} from {execution.previous_version} to {execution.restored_version}.</p>
+                    )}
+                </div>
+
+                {/* Step 4: verify recovery from real, mutated operational state */}
+                <div className="rounded-lg border border-border p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                        <LifecycleTag role="VERIFICATION" label="Verify" />
+                        {verified && <Check size={14} className="text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Confirms recovery via <code className="font-mono">verify_remediation</code>, reflecting actual current service state.</p>
+                    <button
+                        type="button"
+                        disabled={busy || !webmcpAvailable || !executed}
+                        onClick={() => run('verify_remediation', { incident_id: investigation.incidentId }, setVerification)}
+                        className="inline-flex items-center gap-2 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground disabled:opacity-50"
+                    >
+                        {busy && executed && !verification ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                        Verify recovery
+                    </button>
+                    {verification && (
+                        <p className={`mt-2 text-xs ${verification.success ? 'text-green-400' : 'text-yellow-300'}`}>{verification.reason}</p>
+                    )}
+                </div>
+
+                {!webmcpAvailable && (
+                    <div className="rounded-lg border border-yellow-400/30 bg-yellow-400/10 p-3 text-center text-xs font-semibold text-yellow-300">
+                        WebMCP unavailable &mdash; remediation actions are disabled
+                    </div>
+                )}
             </CardContent>
         </Card>
     )
@@ -542,7 +690,7 @@ export default function LiveInvestigation({ webmcpAvailable }: { webmcpAvailable
                         <>
                            <RootCauseAssessmentCard investigation={investigation} />
                            <WhyCard investigation={investigation} />
-                           <RecommendationCard investigation={investigation} />
+                           <RemediationPanel investigation={investigation} webmcpAvailable={webmcpAvailable} />
                            <TimelineCard timeline={investigation.timeline} />
                            <SignalAnalysisCard signals={investigation.signals} />
                            {investigation.correlations && investigation.correlations.length > 0 && (

@@ -1,6 +1,6 @@
 import { invokeTool } from './data-access';
 import { Status, Tool } from './types';
-import { getActivity as getAgentActivity, subscribe } from './activity-store';
+import { getActivity as getAgentActivity, subscribe, recordActivity } from './activity-store';
 
 let toolExecutor: ((name: string, args: Record<string, unknown>) => Promise<any>) | null = null;
 
@@ -154,21 +154,36 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
   },
 ]
 
-export const executeTool = (
+export const executeTool = async (
   name: string,
   args: Record<string, unknown>,
 ) => {
-  // The 'get_agent_activity' tool is a special case that reads from the local activity store.
+  // The 'get_agent_activity' tool is a special case that reads from the local activity store
+  // and is not itself recorded, to avoid the activity feed observing itself.
   if (name === 'get_agent_activity') {
-    return Promise.resolve({ activity: getAgentActivity() });
+    return { activity: getAgentActivity() };
   }
 
-  if (toolExecutor) {
-    return toolExecutor(name, args);
+  const startTime = performance.now();
+  let result: any;
+
+  try {
+    result = toolExecutor
+      ? await toolExecutor(name, args)
+      // All other tools are invoked through the deterministic data access layer.
+      : invokeTool(name, args);
+  } catch (error) {
+    result = { error: error instanceof Error ? error.message : String(error) };
   }
 
-  // All other tools are invoked through the deterministic data access layer.
-  return Promise.resolve(invokeTool(name, args));
+  const duration = Math.round(performance.now() - startTime);
+
+  // This is the single source of truth for the Agent Activity audit trail: every
+  // execution, whether triggered by the Tool Inspector, an investigation, or a
+  // real WebMCP agent call, is recorded exactly once, here.
+  recordActivity(name, args, result, duration);
+
+  return result;
 }
 
 export { getAgentActivity, subscribe };

@@ -13,13 +13,18 @@ import {
   Bot,
   Box,
   Check,
+  ChevronDown,
   ChevronRight,
+  Clock,
   Code2,
+  Copy,
   Gauge,
   Globe2,
   LayoutDashboard,
+  Loader2,
   Menu,
   Network,
+  Play,
   RefreshCw,
   Search,
   Server,
@@ -41,6 +46,7 @@ import {
 } from '@/lib/activity-store'
 import {
   getIncident,
+  getIncidentTimeline,
   getServices
 } from '@/lib/data-access'
 
@@ -708,27 +714,11 @@ function Overview({
             </CardTitle>
 
             <div className="space-y-5 p-5">
-              {[
-                [
-                  '14:35',
-                  'Incident created',
-                  'INC-1042 opened by monitoring',
-                ],
-                [
-                  '14:34',
-                  'Error rate threshold',
-                  'Payment API 5xx reached 23.4%',
-                ],
-                [
-                  '14:29',
-                  'Deployment completed',
-                  'payment-api v2.7.3',
-                ],
-              ].map(
+              {[...getIncidentTimeline(incident.id)].reverse().map(
                 ([time, title, detail]) => (
                   <div
                     className="flex gap-3"
-                    key={time}
+                    key={`${time}-${title}`}
                   >
                     <span className="w-11 shrink-0 font-mono text-sm text-muted-foreground">
                       {time}
@@ -945,11 +935,270 @@ function Incidents({
 /* WebMCP Tools                                                                */
 /* -------------------------------------------------------------------------- */
 
+function ToolInspector({
+  tool,
+  category,
+  webmcpAvailable,
+  onClose,
+}: {
+  tool: (typeof toolDefinitions)[number]
+  category?: string
+  webmcpAvailable: boolean
+  onClose: () => void
+}) {
+  const properties: Record<string, { type?: string; description?: string; enum?: string[] }> =
+    tool.inputSchema?.properties || {}
+  const required: string[] = tool.inputSchema?.required || []
+  const fieldNames = Object.keys(properties)
+
+  const buildDefaults = () => {
+    const defaults: Record<string, string> = {}
+    for (const key of fieldNames) {
+      if (key === 'incident_id') defaults[key] = 'INC-1042'
+      else if (key === 'service_id') defaults[key] = 'payment-api'
+      else if (properties[key].enum) defaults[key] = properties[key].enum![0]
+      else if (properties[key].type === 'boolean') defaults[key] = 'false'
+      else defaults[key] = ''
+    }
+    return defaults
+  }
+
+  const [values, setValues] = useState<Record<string, string>>(buildDefaults)
+  const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle')
+  const [result, setResult] = useState<Record<string, unknown> | null>(null)
+  const [durationMs, setDurationMs] = useState<number | null>(null)
+  const [rawOpen, setRawOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const setField = (key: string, value: string) =>
+    setValues((prev) => ({ ...prev, [key]: value }))
+
+  const handleExecute = async () => {
+    setStatus('running')
+    setResult(null)
+    const start = performance.now()
+
+    const args: Record<string, unknown> = {}
+    for (const key of fieldNames) {
+      const prop = properties[key]
+      const raw = values[key]
+      if (raw === '' && !required.includes(key)) continue
+      args[key] = prop.type === 'boolean' ? raw === 'true' : raw
+    }
+
+    try {
+      const response = await executeTool(tool.name, args)
+      setResult(response)
+      setDurationMs(Math.round(performance.now() - start))
+      setStatus(response?.error || response?.success === false ? 'error' : 'success')
+    } catch (error) {
+      setResult({ error: error instanceof Error ? error.message : String(error) })
+      setDurationMs(Math.round(performance.now() - start))
+      setStatus('error')
+    }
+  }
+
+  const copyJson = () => {
+    navigator.clipboard.writeText(JSON.stringify(result, null, 2))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  const structuredEntries = result
+    ? Object.entries(result).filter(([, v]) => typeof v !== 'object' || v === null)
+    : []
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-border bg-background shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-background/95 px-6 py-5 backdrop-blur">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+              <code className="truncate font-mono text-[15px] font-semibold">{tool.name}</code>
+            </div>
+
+            <span className="rounded-md border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+              {category}
+            </span>
+
+            <p className="mt-3 max-w-md text-[13px] leading-5 text-muted-foreground">{tool.description}</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close tool inspector"
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-6 px-6 py-5">
+          {!webmcpAvailable && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-300/30 bg-amber-300/5 p-4 text-sm text-amber-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <div>
+                <div className="font-semibold">WebMCP unavailable</div>
+                <div className="mt-1 text-xs text-amber-200/80">
+                  This tool cannot be executed until the WebMCP bridge is active. There is no local fallback.
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Input</div>
+
+            {fieldNames.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground">This tool takes no input.</p>
+            ) : (
+              <div className="space-y-4">
+                {fieldNames.map((key) => {
+                  const prop = properties[key]
+                  const isRequired = required.includes(key)
+
+                  return (
+                    <div key={key}>
+                      <label className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+                        <code className="font-mono text-[11px]">{key}</code>
+                        {isRequired && <span className="text-red-400">*</span>}
+                      </label>
+
+                      {prop.enum ? (
+                        <select
+                          value={values[key] || ''}
+                          onChange={(event) => setField(key, event.target.value)}
+                          className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+                        >
+                          {prop.enum.map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      ) : prop.type === 'boolean' ? (
+                        <select
+                          value={values[key] || 'false'}
+                          onChange={(event) => setField(key, event.target.value)}
+                          className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+                        >
+                          <option value="false">false</option>
+                          <option value="true">true</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={values[key] || ''}
+                          onChange={(event) => setField(key, event.target.value)}
+                          placeholder={prop.description}
+                          className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+                        />
+                      )}
+
+                      {prop.description && (
+                        <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{prop.description}</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExecute}
+            disabled={status === 'running' || !webmcpAvailable}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {status === 'running' ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            Execute
+          </button>
+
+          {status !== 'idle' && (
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Result</div>
+
+                <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                  {status === 'running' && (
+                    <span className="flex items-center gap-1.5 text-accent-foreground">
+                      <Loader2 size={12} className="animate-spin" /> Running
+                    </span>
+                  )}
+                  {status === 'success' && (
+                    <span className="flex items-center gap-1.5 text-emerald-400">
+                      <Check size={12} /> Success
+                    </span>
+                  )}
+                  {status === 'error' && (
+                    <span className="flex items-center gap-1.5 text-red-400">
+                      <X size={12} /> Error
+                    </span>
+                  )}
+                  {durationMs !== null && (
+                    <span className="flex items-center gap-1"><Clock size={12} />{durationMs} ms</span>
+                  )}
+                </div>
+              </div>
+
+              {structuredEntries.length > 0 && (
+                <div className="mb-3 space-y-1.5 rounded-lg border border-border bg-card p-3">
+                  {structuredEntries.map(([key, value]) => (
+                    <div key={key} className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="text-muted-foreground">{key}</span>
+                      <span className="truncate font-mono font-semibold">{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setRawOpen((open) => !open)}
+                className="mb-2 flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
+              >
+                Raw JSON
+                <ChevronDown size={14} className={rawOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+              </button>
+
+              {rawOpen && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={copyJson}
+                    className="absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-background/80 px-2 py-1 text-[10px] font-medium hover:bg-accent"
+                  >
+                    {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                    {copied ? 'Copied' : 'Copy JSON'}
+                  </button>
+
+                  <pre className="max-h-80 overflow-auto rounded-md bg-card p-3 pr-16 font-mono text-[11px] leading-5">
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ToolsPage({
   webmcpAvailable,
 }: {
   webmcpAvailable: boolean
 }) {
+  const [selectedTool, setSelectedTool] = useState<(typeof toolDefinitions)[number] | null>(null)
+
   return (
     <>
       <PageHeader
@@ -989,6 +1238,7 @@ function ToolsPage({
             <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
               These capabilities are exposed to compatible agents through{' '}
               <code className="font-semibold text-foreground">document.modelContext.registerTool()</code>.
+              Select a tool below to open the inspector and execute it directly.
             </p>
           </div>
         </div>
@@ -1006,53 +1256,58 @@ function ToolsPage({
         </CardTitle>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3">
-          {toolDefinitions.map((tool) => (
-            <div
-              className="border-b border-border p-5 md:[&:nth-child(even)]:border-l"
-              key={tool.name}
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+          {toolDefinitions.map((tool) => {
+            const fieldCount = Object.keys(tool.inputSchema?.properties || {}).length
 
-                  <code className="truncate font-mono text-sm font-semibold">
-                    {tool.name}
-                  </code>
+            return (
+              <button
+                type="button"
+                onClick={() => setSelectedTool(tool)}
+                className="border-b border-border p-5 text-left transition-colors hover:bg-accent/40 md:[&:nth-child(even)]:border-l"
+                key={tool.name}
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+
+                    <code className="truncate font-mono text-sm font-semibold">
+                      {tool.name}
+                    </code>
+                  </div>
+
+                  <span className="shrink-0 rounded-md border border-border px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {tools.find(t => t.name === tool.name)?.category}
+                  </span>
                 </div>
 
-                <span className="shrink-0 rounded-md border border-border px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {tools.find(t => t.name === tool.name)?.category}
-                </span>
-              </div>
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
+                  {tool.description}
+                </p>
 
-              <p className="mb-4 text-sm leading-6 text-muted-foreground">
-                {tool.description}
-              </p>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>
+                    {fieldCount === 0 ? 'No input' : `${fieldCount} input field${fieldCount === 1 ? '' : 's'}`}
+                  </span>
 
-              <div className="space-y-3 text-xs text-muted-foreground">
-                <div className='font-mono'>
-                  <span className="font-sans font-bold text-foreground">
-                    INPUT
-                  </span>{' '}
-                  <pre className='inline'>{JSON.stringify(tool.inputSchema, null, 2)}</pre>
+                  <span className="flex items-center gap-1 font-semibold text-accent-foreground">
+                    Inspect
+                    <ChevronRight size={12} />
+                  </span>
                 </div>
-                 <div className='font-mono'>
-                  <span className="font-sans font-bold text-foreground">
-                    OUTPUT
-                  </span>{' '}
-                  JSON
-                </div>
-                 <div>
-                  <span className="font-bold text-foreground">
-                    STATUS
-                  </span>{' '}
-                  <span className='text-emerald-400'>Available</span>
-                </div>
-              </div>
-            </div>
-          ))}
+              </button>
+            )
+          })}
         </div>
       </Card>
+
+      {selectedTool && (
+        <ToolInspector
+          tool={selectedTool}
+          category={tools.find((t) => t.name === selectedTool.name)?.category}
+          webmcpAvailable={webmcpAvailable}
+          onClose={() => setSelectedTool(null)}
+        />
+      )}
     </>
   )
 }

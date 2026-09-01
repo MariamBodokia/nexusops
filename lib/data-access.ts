@@ -5,8 +5,9 @@ import {
   metrics,
   deployments,
   healthyMetrics,
+  remediationState,
+  timeline,
 } from './operational-state';
-import { recordActivity } from './activity-store';
 
 // Service-related functions
 export const getServices = () => services;
@@ -555,6 +556,10 @@ export function invokeTool(
       ) ===
         'rollback_payment_api'
 
+    if (valid) {
+      remediationState.approved = true;
+    }
+
     result = valid
       ? {
           success: true,
@@ -584,7 +589,8 @@ export function invokeTool(
       String(
         args.action || '',
       ) ===
-        'rollback_payment_api'
+        'rollback_payment_api' &&
+      remediationState.approved
 
     if (!valid) {
       result = {
@@ -592,10 +598,25 @@ export function invokeTool(
 
         blocked: true,
 
-        reason:
-          'Human approval required',
+        reason: !remediationState.approved
+          ? 'Human approval has not been recorded for this action.'
+          : 'Human approval required',
       }
     } else {
+      // Mutate the real operational state so verification reflects an actual rollback,
+      // instead of returning a hardcoded response regardless of what happened.
+      const paymentApi = getService('payment-api');
+      if (paymentApi) {
+        paymentApi.status = 'healthy';
+        paymentApi.latency = 168;
+        paymentApi.errorRate = 0.5;
+        paymentApi.cpu = 54;
+        paymentApi.memory = 66;
+        paymentApi.deployment = 'v2.7.2 · rolled back'
+      }
+      incident.status = 'Resolved';
+      remediationState.executed = true;
+
       result = {
         success: true,
 
@@ -629,17 +650,27 @@ export function invokeTool(
     name ===
       'verify_incident'
   ) {
-      result = {
-        success: false,
-        incident_id:
-          incidentId,
-        status:
-          'investigating',
-        incident_status:
-          'investigating',
-        reason:
-          'Remediation has not been executed.',
-      }
+    const paymentApi = getService('payment-api');
+    const recovered = remediationState.executed && paymentApi?.status === 'healthy';
+
+    result = recovered
+      ? {
+          success: true,
+          incident_id: incidentId,
+          status: 'resolved',
+          incident_status: 'resolved',
+          service_status: paymentApi?.status,
+          latency_ms: paymentApi?.latency,
+          error_rate: paymentApi?.errorRate,
+          reason: 'Rollback to v2.7.2 verified: latency and error rate returned to baseline.',
+        }
+      : {
+          success: false,
+          incident_id: incidentId,
+          status: 'investigating',
+          incident_status: 'investigating',
+          reason: 'Remediation has not been executed.',
+        }
   }
 
   else {
@@ -648,12 +679,6 @@ export function invokeTool(
         `Unknown tool: ${name}`,
     }
   }
-
-  recordActivity(
-    name,
-    args,
-    result,
-  );
 
   return result
 }

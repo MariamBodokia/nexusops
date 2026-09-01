@@ -268,6 +268,16 @@ export const healthyMetrics: HealthyMetrics = {
   request_rate: 1180,
 }
 
+// [time, title, detail] tuples describing the chronological run-up to the incident.
+export const timeline: [string, string, string][] = [
+  ['14:29', 'Deployment completed', 'payment-api v2.7.3 deployed with connection pooling change'],
+  ['14:31', 'Connection pool utilization rising', 'payments pool utilization crossed 70%'],
+  ['14:32', 'Connection pool utilization elevated', 'payments pool utilization crossed 85%'],
+  ['14:33', 'Database connection timeout', 'connection pool utilization at 93%, timeouts observed'],
+  ['14:34', 'Error rate threshold crossed', 'Payment API 5xx rate reached 23.4%'],
+  ['14:35', 'Incident created', 'INC-1042 opened by monitoring'],
+]
+
 export const deployments: Deployment[] = [
   {
     version: 'v2.7.3',
@@ -287,3 +297,11 @@ export const deployments: Deployment[] = [
     change: 'PCI logging updates',
   },
 ]
+
+// Tracks the real, in-memory state of the human-approval -> action -> verify
+// lifecycle for the active incident's remediation, so verification reflects
+// what actually happened rather than a hardcoded response.
+export const remediationState = {
+  approved: false,
+  executed: false,
+}

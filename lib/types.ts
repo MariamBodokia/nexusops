@@ -115,6 +115,7 @@ export type ActivityEntry = {
     args: string;
     success: boolean;
     summary: string;
+    duration: number;
 };
 
 export type ToolDefinition = {

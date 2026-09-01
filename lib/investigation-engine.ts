@@ -14,7 +14,6 @@ import {
     CorrelatedEvidence
 } from './types';
 import { executeTool } from './nexus-data';
-import { recordActivity } from './activity-store';
 
 const executeTrackedTool = async (
     toolName: string,
@@ -26,12 +25,10 @@ const executeTrackedTool = async (
     let result: any;
     try {
         result = await executeTool(toolName, args);
-        success = true;
-        recordActivity(toolName, args, result);
+        success = !(result && typeof result === 'object' && (result.error || result.success === false));
         return result;
     } catch (e) {
         result = e instanceof Error ? e.message : String(e);
-        recordActivity(toolName, args, { error: result });
         throw e;
     } finally {
         const endTime = Date.now();
@@ -243,25 +240,32 @@ const correlateEvidenceForHypotheses = (hypotheses: Hypothesis[], evidence: Evid
     const incidentStart = timeline.find(t => t.type === 'incident_start');
     const deploymentEvent = timeline.find(t => t.type === 'deployment');
 
+    // Several signals (latency/error/db) can resolve to the same underlying evidence
+    // item (a single metrics snapshot), so dedupe before recording to avoid double
+    // counting the same evidence in a hypothesis's score or list.
+    const addEvidence = (ids: string[], evidenceItem: Evidence | undefined) => {
+        if (evidenceItem && !ids.includes(evidenceItem.id)) ids.push(evidenceItem.id);
+    };
+
     for (const h of hypotheses) {
         if (h.id === 'h1') { // Connection-pooling regression
-            if (deploymentEvidence) h.supportingEvidenceIds.push(deploymentEvidence.id);
-            if (connectionTimeoutLog) h.supportingEvidenceIds.push(connectionTimeoutLog.id);
-            if (dbConnectionSpike) h.supportingEvidenceIds.push(dbConnectionSpike.id);
-            if (errorSpike) h.supportingEvidenceIds.push(errorSpike.id);
-            if (latencySpike) h.supportingEvidenceIds.push(latencySpike.id);
+            addEvidence(h.supportingEvidenceIds, deploymentEvidence);
+            addEvidence(h.supportingEvidenceIds, connectionTimeoutLog);
+            addEvidence(h.supportingEvidenceIds, dbConnectionSpike);
+            addEvidence(h.supportingEvidenceIds, errorSpike);
+            addEvidence(h.supportingEvidenceIds, latencySpike);
             if (incidentStart && deploymentEvent && deploymentEvent.time < incidentStart.time) {
                 const depEvidence = evidence.find(e => e.type === 'Deployment');
-                if (depEvidence) h.supportingEvidenceIds.push(depEvidence.id);
+                addEvidence(h.supportingEvidenceIds, depEvidence);
             }
         } else if (h.id === 'h2') { // Traffic surge
             const trafficSpike = evidence.find(e => e.type === 'Metrics' && e.details.request_rate.slice(-1)[0] > e.details.request_rate[0] * 1.5);
-            if (trafficSpike) h.supportingEvidenceIds.push(trafficSpike.id);
-            if (deploymentEvidence) h.contradictingEvidenceIds.push(deploymentEvidence.id);
+            addEvidence(h.supportingEvidenceIds, trafficSpike);
+            addEvidence(h.contradictingEvidenceIds, deploymentEvidence);
         } else if (h.id === 'h3') { // CPU Saturation
             const cpuSpike = evidence.find(e => e.type === 'Metrics' && e.details.cpu_percent.slice(-1)[0] > 90);
-            if (cpuSpike) h.supportingEvidenceIds.push(cpuSpike.id);
-            if (deploymentEvidence) h.contradictingEvidenceIds.push(deploymentEvidence.id);
+            addEvidence(h.supportingEvidenceIds, cpuSpike);
+            addEvidence(h.contradictingEvidenceIds, deploymentEvidence);
         }
     }
 };
@@ -382,14 +386,34 @@ export const runInvestigation = async (
     onStep('Fetching service metrics...');
     await executeTrackedTool('get_metrics', { service_id: incident.service }, onToolExecutionAndCollect);
 
+    onStep('Comparing telemetry against healthy baseline...');
+    await executeTrackedTool('compare_metrics', { incident_id: incidentId, service_id: incident.service }, onToolExecutionAndCollect);
+
     onStep('Querying service logs...');
     await executeTrackedTool('get_logs', { service_id: incident.service }, onToolExecutionAndCollect);
+
+    onStep('Correlating deployment, telemetry and log signals...');
+    await executeTrackedTool('correlate_events', { incident_id: incidentId, service_id: incident.service }, onToolExecutionAndCollect);
+
+    onStep('Running evidence-based diagnostic...');
+    await executeTrackedTool('run_diagnostic', { incident_id: incidentId, service_id: incident.service }, onToolExecutionAndCollect);
 
     onStep('Correlating evidence and analyzing root cause...');
     const investigationResult = analyzeEvidence(incident, toolExecutions);
 
     // This callback is just to satisfy the old signature, can be removed later
     investigationResult.rawEvidence.forEach(onRawEvidence);
+
+    if (investigationResult.rootCause) {
+        const rootHypothesis = investigationResult.hypotheses.find(h => h.id === investigationResult.rootCause!.hypothesisId);
+        if (rootHypothesis) {
+            onStep('Recording investigation finding...');
+            await executeTrackedTool('create_investigation_finding', {
+                incident_id: incidentId,
+                finding: `${rootHypothesis.title}: ${rootHypothesis.description} (confidence ${investigationResult.rootCause.confidence}%, ${rootHypothesis.supportingEvidenceIds.length} supporting / ${rootHypothesis.contradictingEvidenceIds.length} contradicting evidence items).`,
+            }, onToolExecutionAndCollect);
+        }
+    }
 
     return investigationResult;
 };
