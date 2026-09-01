@@ -1535,29 +1535,18 @@ export default function Page() {
 
   useEffect(() => {
     let cancelled = false
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
 
-    const registerTools = async () => {
-      if (
-        typeof document === 'undefined'
-      ) {
-        return
-      }
+    const getModelContext = (): ModelContext | undefined =>
+      typeof document === 'undefined'
+        ? undefined
+        : (
+            document as Document & {
+              modelContext?: ModelContext
+            }
+          ).modelContext
 
-      const modelContext = (
-        document as Document & {
-          modelContext?: ModelContext
-        }
-      ).modelContext
-
-      if (
-        !modelContext ||
-        typeof modelContext.registerTool !== 'function'
-      ) {
-        return
-      }
-
-      setWebmcpAvailable(true)
-
+    const registerTools = async (modelContext: ModelContext) => {
       /*
        * Keep registration state local to this effect.
        *
@@ -1571,6 +1560,7 @@ export default function Page() {
        * this page instance and stop if cleanup happens.
        */
       const registeredNames = new Set<string>()
+      let registeredCount = 0
 
       for (const definition of toolDefinitions) {
         if (cancelled) {
@@ -1604,6 +1594,7 @@ export default function Page() {
               )
             },
           })
+          registeredCount += 1
         } catch (error) {
           const message =
             error instanceof Error
@@ -1613,18 +1604,18 @@ export default function Page() {
           /*
            * Duplicate registration can still happen if
            * React remounts while the browser bridge keeps
-           * the previous registrations alive.
-           *
-           * Do not treat that as an application-breaking
-           * error.
+           * the previous registrations alive. The tool is
+           * still registered with the bridge, so count it.
            */
           if (
-            !message
+            message
               .toLowerCase()
               .includes(
                 'duplicate tool name',
               )
           ) {
+            registeredCount += 1
+          } else {
             console.warn(
               '[NexusOps] WebMCP registration failed:',
               definition.name,
@@ -1633,12 +1624,66 @@ export default function Page() {
           }
         }
       }
+
+      if (cancelled) {
+        return
+      }
+
+      console.info(
+        `[NexusOps] WebMCP: ${registeredCount}/${toolDefinitions.length} tools registered.`,
+      )
+
+      // The bridge is only ACTIVE once at least one tool is confirmed
+      // registered, never just because registerTool exists as a function.
+      setWebmcpAvailable(registeredCount > 0)
     }
 
-    void registerTools()
+    /*
+     * document.modelContext can be injected by a browser extension or agent
+     * host asynchronously, sometimes after this effect's first run. Poll
+     * briefly instead of permanently deciding "unavailable" on the first
+     * tick, so a slightly-late bridge is still detected correctly.
+     */
+    const attempt = (attemptsLeft: number) => {
+      if (cancelled) {
+        return
+      }
+
+      const modelContext = getModelContext()
+
+      if (
+        modelContext &&
+        typeof modelContext.registerTool === 'function'
+      ) {
+        console.info(
+          '[NexusOps] WebMCP: document.modelContext detected.',
+        )
+        void registerTools(modelContext)
+        return
+      }
+
+      if (attemptsLeft <= 0) {
+        console.info(
+          '[NexusOps] WebMCP: document.modelContext not available; bridge unavailable.',
+        )
+        setWebmcpAvailable(false)
+        return
+      }
+
+      pollTimer = setTimeout(
+        () => attempt(attemptsLeft - 1),
+        250,
+      )
+    }
+
+    // Poll for up to ~5 seconds before giving up.
+    attempt(20)
 
     return () => {
       cancelled = true
+      if (pollTimer) {
+        clearTimeout(pollTimer)
+      }
     }
   }, [])
 
