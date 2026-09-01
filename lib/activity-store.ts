@@ -12,28 +12,25 @@ export const subscribe = (listener: () => void) => {
 const notify = () => listeners.forEach(listener => listener());
 
 const roleFor = (name: string): AgentRole => {
-  if (['get_active_incidents', 'get_incident', 'get_service_health'].includes(name)) {
-    return 'Incident Commander';
+  if (['get_metrics', 'compare_metrics', 'get_service_health'].includes(name)) {
+    return 'SRE Agent';
+  }
+  if (['get_incident', 'get_active_incidents', 'get_incident_timeline', 'get_dependencies', 'get_services'].includes(name)) {
+    return 'NOC Agent';
+  }
+  if (['get_deployment_history', 'get_logs', 'correlate_events'].includes(name)) {
+    return 'Developer Agent';
+  }
+  if (['get_incident_evidence'].includes(name)) {
+    return 'SOC Agent';
   }
   if (name === 'approve_remediation') {
     return 'Human Operator';
   }
-  if (['get_recent_logs', 'search_operational_evidence', 'get_error_metrics', 'get_latency_metrics'].includes(name)) {
-    return 'Observability Agent';
+  if (['run_diagnostic', 'create_investigation_finding', 'propose_remediation', 'execute_remediation', 'verify_remediation', 'verify_incident', 'get_agent_activity'].includes(name)) {
+    return 'Incident Commander';
   }
-  if (['get_recent_deployments', 'get_deployment', 'get_change_history'].includes(name)) {
-    return 'DevOps Agent';
-  }
-  if (['get_network_health', 'get_dns_events', 'get_service_dependencies', 'get_network_events'].includes(name)) {
-    return 'Network Agent';
-  }
-  if (['get_resource_health', 'get_compute_metrics', 'get_storage_health', 'get_infrastructure_events'].includes(name)) {
-    return 'Cloud / Infrastructure Agent';
-  }
-  if (['get_security_events', 'get_authentication_events', 'search_security_evidence'].includes(name)) {
-    return 'Security Agent';
-  }
-  return 'SRE Agent';
+  return 'Incident Commander';
 };
 
 const summarize = (name: string, result: Record<string, unknown>) => {
@@ -64,13 +61,13 @@ const summarize = (name: string, result: Record<string, unknown>) => {
     return 'Structured result returned';
 };
 
-export const recordActivity = (name: string, args: Record<string, unknown>, result: Record<string, unknown>, duration = 0) => {
+export const recordActivity = (name: string, args: Record<string, unknown>, result: Record<string, unknown>, duration = 0, agentOverride?: AgentRole) => {
   const failed = Boolean(result.error) || result.success === false;
 
   activity = [
     {
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      role: roleFor(name),
+      role: agentOverride || roleFor(name),
       name,
       args: Object.values(args).join(' ') || '—',
       success: !failed,

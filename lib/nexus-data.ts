@@ -20,6 +20,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'List active production incidents requiring operator attention.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['NOC Agent'],
   },
 
   {
@@ -27,11 +32,21 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve the current state of a specific incident.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['NOC Agent'],
   },
   {
     name: 'get_services',
     category: 'OBSERVATION',
-    description: 'Get a list of all services.'
+    description: 'Get a list of all services.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['NOC Agent'],
   },
 
   {
@@ -39,6 +54,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Return correlated metrics, logs, timeline, deployment and finding evidence for an incident.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['SOC Agent', 'Incident Commander'],
   },
 
   {
@@ -46,6 +66,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve current health signals for a service.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['SRE Agent'],
   },
 
   {
@@ -53,6 +78,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve the current service dependency graph and dependency health.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['NOC Agent'],
   },
 
   {
@@ -60,6 +90,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve deployment history for a service.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Developer Agent'],
   },
 
   {
@@ -67,6 +102,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve current telemetry metrics for a service.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['SRE Agent'],
   },
 
   {
@@ -74,6 +114,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Retrieve structured application logs for a service.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Developer Agent', 'SOC Agent'],
   },
 
   {
@@ -81,6 +126,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'INVESTIGATION',
     description:
       'Retrieve the chronological timeline of an incident.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['NOC Agent'],
   },
 
   {
@@ -88,6 +138,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'INVESTIGATION',
     description:
       'Compare incident telemetry against the prior healthy baseline.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['SRE Agent'],
   },
 
   {
@@ -95,6 +150,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'INVESTIGATION',
     description:
       'Correlate deployment events, telemetry changes, logs and incident timing.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'medium',
+    requiresApproval: false,
+    agentRoles: ['Developer Agent', 'SOC Agent'],
   },
 
   {
@@ -102,6 +162,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'INVESTIGATION',
     description:
       'Run an evidence-based diagnostic across incident telemetry without executing remediation.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'medium',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -109,6 +174,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'INVESTIGATION',
     description:
       'Store an investigation finding for human operator review.',
+    readOnly: false,
+    mutating: true,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -116,6 +186,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'RECOMMENDATION',
     description:
       'Generate a safe, human-reviewable mitigation recommendation.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'medium',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -123,6 +198,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'HUMAN CONTROL',
     description:
       'Record explicit human operator approval for the simulated rollback.',
+    readOnly: false,
+    mutating: true,
+    riskLevel: 'medium',
+    requiresApproval: false,
+    agentRoles: ['Human Operator'],
   },
 
   {
@@ -130,6 +210,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'ACTION',
     description:
       'Execute the approved non-destructive simulated rollback.',
+    readOnly: false,
+    mutating: true,
+    riskLevel: 'high',
+    requiresApproval: true,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -137,6 +222,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'VERIFICATION',
     description:
       'Verify service recovery after remediation.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -144,6 +234,11 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'VERIFICATION',
     description:
       'Verify the current incident state.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 
   {
@@ -151,12 +246,18 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     category: 'OBSERVATION',
     description:
       'Read the live audit trail of tool invocations.',
+    readOnly: true,
+    mutating: false,
+    riskLevel: 'low',
+    requiresApproval: false,
+    agentRoles: ['Incident Commander'],
   },
 ]
 
 export const executeTool = async (
   name: string,
   args: Record<string, unknown>,
+  agent?: import('./types').AgentRole,
 ) => {
   // The 'get_agent_activity' tool is a special case that reads from the local activity store
   // and is not itself recorded, to avoid the activity feed observing itself.
@@ -181,7 +282,7 @@ export const executeTool = async (
   // This is the single source of truth for the Agent Activity audit trail: every
   // execution, whether triggered by the Tool Inspector, an investigation, or a
   // real WebMCP agent call, is recorded exactly once, here.
-  recordActivity(name, args, result, duration);
+  recordActivity(name, args, result, duration, agent);
 
   return result;
 }

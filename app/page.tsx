@@ -937,12 +937,12 @@ function Incidents({
 
 function ToolInspector({
   tool,
-  category,
+  meta,
   webmcpAvailable,
   onClose,
 }: {
   tool: (typeof toolDefinitions)[number]
-  category?: string
+  meta?: (typeof tools)[number]
   webmcpAvailable: boolean
   onClose: () => void
 }) {
@@ -1024,9 +1024,38 @@ function ToolInspector({
               <code className="truncate font-mono text-[15px] font-semibold">{tool.name}</code>
             </div>
 
-            <span className="rounded-md border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-              {category}
-            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-md border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                {meta?.category}
+              </span>
+              {meta && (
+                <span className={[
+                  'rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+                  meta.readOnly ? 'border-sky-400/30 text-sky-300' : 'border-amber-300/30 text-amber-300',
+                ].join(' ')}>
+                  {meta.readOnly ? 'READ' : 'WRITE'}
+                </span>
+              )}
+              {meta && (
+                <span className={[
+                  'rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+                  meta.riskLevel === 'high' ? 'border-red-400/30 text-red-400' : meta.riskLevel === 'medium' ? 'border-amber-300/30 text-amber-300' : 'border-emerald-400/30 text-emerald-400',
+                ].join(' ')}>
+                  {meta.riskLevel} risk
+                </span>
+              )}
+              {meta?.requiresApproval && (
+                <span className="rounded-md border border-red-400/30 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-red-400">
+                  Requires approval
+                </span>
+              )}
+            </div>
+
+            {meta && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Agents: {meta.agentRoles.join(', ')}
+              </p>
+            )}
 
             <p className="mt-3 max-w-md text-[13px] leading-5 text-muted-foreground">{tool.description}</p>
           </div>
@@ -1258,6 +1287,7 @@ function ToolsPage({
         <div className="grid md:grid-cols-2 lg:grid-cols-3">
           {toolDefinitions.map((tool) => {
             const fieldCount = Object.keys(tool.inputSchema?.properties || {}).length
+            const meta = tools.find(t => t.name === tool.name)
 
             return (
               <button
@@ -1276,13 +1306,35 @@ function ToolsPage({
                   </div>
 
                   <span className="shrink-0 rounded-md border border-border px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground">
-                    {tools.find(t => t.name === tool.name)?.category}
+                    {meta?.category}
                   </span>
                 </div>
 
                 <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   {tool.description}
                 </p>
+
+                {meta && (
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    <span className={[
+                      'rounded-md border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider',
+                      meta.readOnly ? 'border-sky-400/30 text-sky-300' : 'border-amber-300/30 text-amber-300',
+                    ].join(' ')}>
+                      {meta.readOnly ? 'Read' : 'Write'}
+                    </span>
+                    <span className={[
+                      'rounded-md border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider',
+                      meta.riskLevel === 'high' ? 'border-red-400/30 text-red-400' : meta.riskLevel === 'medium' ? 'border-amber-300/30 text-amber-300' : 'border-emerald-400/30 text-emerald-400',
+                    ].join(' ')}>
+                      {meta.riskLevel} risk
+                    </span>
+                    {meta.requiresApproval && (
+                      <span className="rounded-md border border-red-400/30 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-red-400">
+                        Approval required
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                   <span>
@@ -1303,7 +1355,7 @@ function ToolsPage({
       {selectedTool && (
         <ToolInspector
           tool={selectedTool}
-          category={tools.find((t) => t.name === selectedTool.name)?.category}
+          meta={tools.find((t) => t.name === selectedTool.name)}
           webmcpAvailable={webmcpAvailable}
           onClose={() => setSelectedTool(null)}
         />
@@ -1321,13 +1373,36 @@ function ActivityPage({
 }: {
   activity: ActivityEntry[]
 }) {
+  const filters = ['ALL', 'SRE Agent', 'NOC Agent', 'Developer Agent', 'SOC Agent', 'Incident Commander', 'Human Operator'] as const
+  const [filter, setFilter] = useState<(typeof filters)[number]>('ALL')
+
+  const filtered = filter === 'ALL' ? activity : activity.filter((entry) => entry.role === filter)
+
   return (
     <>
       <PageHeader
         eyebrow="Agent activity / audit"
         title="Agent activity"
-        sub="A live audit trail of WebMCP tool invocations made by compatible agents and the investigation interface."
+        sub="A structured, chronological audit trail of every real WebMCP tool invocation made by agents and the investigation interface."
       />
+
+      <div className="mb-6 flex flex-wrap gap-2">
+        {filters.map((role) => (
+          <button
+            key={role}
+            type="button"
+            onClick={() => setFilter(role)}
+            className={[
+              'rounded-md border px-3 py-1.5 text-[11px] font-semibold transition-colors',
+              filter === role
+                ? 'border-accent-foreground/30 bg-accent text-accent-foreground'
+                : 'border-border text-muted-foreground hover:bg-accent/40',
+            ].join(' ')}
+          >
+            {role === 'ALL' ? 'All agents' : role}
+          </button>
+        ))}
+      </div>
 
       <Card>
         <CardTitle
@@ -1341,7 +1416,7 @@ function ActivityPage({
           Execution feed
         </CardTitle>
 
-        {activity.length === 0 ? (
+        {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-5 py-20 text-center">
             <Bot
               className="mb-4 text-muted-foreground"
@@ -1360,50 +1435,63 @@ function ActivityPage({
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {activity.map((entry, index) => (
-              <div
-                className="flex gap-4 px-5 py-4"
-                key={`${entry.time}-${entry.name}-${index}`}
-              >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-                  <Bot size={14} />
-                </div>
+            {filtered.map((entry, index) => {
+              const meta = tools.find((t) => t.name === entry.name)
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-semibold text-accent-foreground">
-                      {entry.role}
-                    </span>
-
-                    <code className="font-mono text-[10px] font-semibold">
-                      {entry.name}
-                    </code>
-
-                    <span className="text-[10px] text-muted-foreground">
-                      {entry.time}
-                    </span>
+              return (
+                <div
+                  className="flex gap-4 px-5 py-4"
+                  key={`${entry.time}-${entry.name}-${index}`}
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                    <Bot size={14} />
                   </div>
 
-                  <div className="mt-1 text-[10px] leading-5 text-muted-foreground">
-                    {entry.args} · {entry.summary}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-semibold text-accent-foreground">
+                        {entry.role}
+                      </span>
+
+                      <code className="font-mono text-[10px] font-semibold">
+                        {entry.name}
+                      </code>
+
+                      {meta && (
+                        <span className={[
+                          'rounded border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider',
+                          meta.riskLevel === 'high' ? 'border-red-400/30 text-red-400' : meta.riskLevel === 'medium' ? 'border-amber-300/30 text-amber-300' : 'border-emerald-400/30 text-emerald-400',
+                        ].join(' ')}>
+                          {meta.riskLevel} risk
+                        </span>
+                      )}
+
+                      <span className="text-[10px] text-muted-foreground">
+                        {entry.time} · {entry.duration}ms
+                      </span>
+                    </div>
+
+                    <div className="mt-1 text-[10px] leading-5 text-muted-foreground">
+                      {entry.args} · {entry.summary}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 pt-1">
+                    {entry.success ? (
+                      <Check
+                        className="text-emerald-400"
+                        size={14}
+                      />
+                    ) : (
+                      <X
+                        className="text-red-400"
+                        size={14}
+                      />
+                    )}
                   </div>
                 </div>
-
-                <div className="shrink-0 pt-1">
-                  {entry.success ? (
-                    <Check
-                      className="text-emerald-400"
-                      size={14}
-                    />
-                  ) : (
-                    <X
-                      className="text-red-400"
-                      size={14}
-                    />
-                  )}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </Card>

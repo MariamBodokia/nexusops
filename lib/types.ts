@@ -92,21 +92,26 @@ export type Evidence = {
     description: string;
 };
 
+export type AgentRole =
+    | 'SRE Agent'
+    | 'NOC Agent'
+    | 'Developer Agent'
+    | 'SOC Agent'
+    | 'Incident Commander'
+    | 'Human Operator';
+
+export type RiskLevel = 'low' | 'medium' | 'high';
+
 export type Tool = {
     name: string;
     category: string;
     description: string;
+    readOnly: boolean;
+    mutating: boolean;
+    riskLevel: RiskLevel;
+    requiresApproval: boolean;
+    agentRoles: AgentRole[];
 };
-
-export type AgentRole =
-    | 'Incident Commander'
-    | 'SRE Agent'
-    | 'Observability Agent'
-    | 'DevOps Agent'
-    | 'Network Agent'
-    | 'Cloud / Infrastructure Agent'
-    | 'Security Agent'
-    | 'Human Operator';
 
 export type ActivityEntry = {
     time: string;
@@ -134,6 +139,8 @@ export type ToolExecution = {
     duration: number;
     result: any;
     success: boolean;
+    agent?: AgentRole;
+    rationale?: string;
 };
 
 // =================================================================
@@ -152,6 +159,9 @@ export type Investigation = {
     rootCause: RootCauseAssessment | null;
     recommendation: Recommendation | null;
     rawEvidence: Evidence[];
+    perspectives: AgentPerspective[];
+    commander: CommanderAssessment | null;
+    causalChain: CausalChainNode[];
 };
 
 export type InvestigationSummary = {
@@ -205,4 +215,35 @@ export type Recommendation = {
     risk: 'low' | 'medium' | 'high';
     reason: string;
     status: 'pending' | 'approved' | 'rejected';
+};
+
+// =================================================================
+// Multi-agent investigation model
+// =================================================================
+
+export type AgentId = 'sre' | 'noc' | 'developer' | 'soc';
+
+export type AgentPerspective = {
+    id: AgentId;
+    name: AgentRole;
+    focus: string;
+    toolsConsulted: string[];
+    hypothesis: string;
+    confidence: number; // 0-100, deterministically derived from evidence
+    supportingEvidenceIds: string[];
+    contradictingEvidenceIds: string[];
+    reasoning: string;
+};
+
+export type CommanderAssessment = {
+    rootCause: string;
+    confidence: number;
+    reasoning: string[];
+    consideredHypotheses: { agent: AgentId; name: AgentRole; hypothesis: string; confidence: number }[];
+    rejected: { agent: AgentId; name: AgentRole; reason: string }[];
+};
+
+export type CausalChainNode = {
+    label: string;
+    detail: string;
 };

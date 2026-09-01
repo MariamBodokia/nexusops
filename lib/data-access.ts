@@ -473,13 +473,65 @@ export function invokeTool(
   else if (
     name === 'run_diagnostic'
   ) {
-    result = {
+    const svcMetrics = getMetrics(serviceId);
+    const recentDeployments = getRecentDeployments(serviceId);
+    const svcLogs = getLogs(serviceId);
+
+    if (!svcMetrics) {
+      result = {
+        error: `Metrics not found for service: ${serviceId}`,
+      }
+    } else {
+      const latest = (values: number[]) => values[values.length - 1];
+      const ratio = (current: number, baseline: number) => baseline ? Number(((current - baseline) / baseline).toFixed(2)) : 0;
+
+      const dbRatio = ratio(latest(svcMetrics.db_connections), healthyMetrics.db_connections);
+      const cpuRatio = ratio(latest(svcMetrics.cpu_percent), healthyMetrics.cpu_percent);
+      const errorRatio = ratio(latest(svcMetrics.error_rate), healthyMetrics.error_rate);
+      const latencyRatio = ratio(latest(svcMetrics.latency_ms), healthyMetrics.latency_ms);
+
+      const recentDeployment = recentDeployments[0];
+      const deployedRecently = Boolean(recentDeployment);
+      const timeoutLogs = svcLogs.filter(l => l[2].toLowerCase().includes('timeout') || l[3].toLowerCase().includes('timeout'));
+
+      const signals = [
+        { signal: 'db_connections', ratio_above_baseline: dbRatio, elevated: dbRatio > 0.5 },
+        { signal: 'cpu_percent', ratio_above_baseline: cpuRatio, elevated: cpuRatio > 0.3 },
+        { signal: 'error_rate', ratio_above_baseline: errorRatio, elevated: errorRatio > 1 },
+        { signal: 'latency_ms', ratio_above_baseline: latencyRatio, elevated: latencyRatio > 1 },
+      ];
+
+      const contributingFactors: string[] = [];
+      if (deployedRecently) contributingFactors.push(`Recent deployment ${recentDeployment.version}: ${recentDeployment.change}`);
+      if (timeoutLogs.length > 0) contributingFactors.push(`${timeoutLogs.length} connection timeout log entr${timeoutLogs.length === 1 ? 'y' : 'ies'} observed`);
+      signals.filter(s => s.elevated).forEach(s => contributingFactors.push(`${s.signal} is ${Math.round(s.ratio_above_baseline * 100)}% above baseline`));
+
+      const diagnosis = deployedRecently && timeoutLogs.length > 0 && dbRatio > 0.5
+        ? `${serviceId} is regressing following deployment ${recentDeployment.version}, consistent with a connection-pooling / configuration change`
+        : dbRatio > 0.5
+          ? `${serviceId} is experiencing database connection saturation`
+          : `${serviceId} shows elevated resource utilization without a single dominant cause`;
+
+      const confidence = Math.min(95, Math.round(
+        signals.filter(s => s.elevated).length * 18 +
+        (deployedRecently ? 15 : 0) +
+        (timeoutLogs.length > 0 ? 12 : 0),
+      ));
+
+      result = {
         success: true,
-        message: 'This is a real tool execution!',
         incident_id: incidentId,
         service_id: serviceId,
-        timestamp: new Date().toISOString()
-    };
+        diagnosis,
+        confidence,
+        signals,
+        contributing_factors: contributingFactors,
+        recommended_next_step: deployedRecently
+          ? 'Review the recent deployment change and consider a rollback if further evidence correlates.'
+          : 'Continue monitoring resource utilization and dependency health.',
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   else if (

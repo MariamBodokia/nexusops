@@ -11,11 +11,9 @@ import {
     Clock,
     FileText,
     List,
-    TrendingUp,
     Zap,
     Target,
     GitCommit,
-    Lightbulb,
     ShieldCheck,
     ThumbsUp,
     ChevronRight,
@@ -25,7 +23,7 @@ import {
     Bot,
     Play,
 } from 'lucide-react'
-import { Investigation, Evidence, ToolExecution, TimelineEvent, Signal, Hypothesis } from '@/lib/types';
+import { Investigation, Evidence, ToolExecution, TimelineEvent, Signal, AgentPerspective, CommanderAssessment, CausalChainNode } from '@/lib/types';
 import {
     Card,
     CardContent,
@@ -101,23 +99,30 @@ function ToolExecutionTrace({ executions, running }: { executions: ToolExecution
         <Card>
             <CardHeader>
                 <CardTitle>WebMCP Execution Trace</CardTitle>
+                <CardDescription>Agent → tool → WebMCP bridge → result, in the order each real call happened.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-5">
                 {executions.length === 0 && !running && (
                     <p className="text-sm text-muted-foreground">Run an investigation to see the tool execution trace.</p>
                 )}
                 {executions.map((exec: ToolExecution) => (
                     <div key={exec.id} className="flex items-start gap-4">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background">
                             {exec.success ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
                         </div>
-                        <div className="flex-1">
-                            <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                {exec.agent && (
+                                    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{exec.agent}</span>
+                                )}
                                 <span className="font-mono text-sm font-semibold">{exec.toolName}</span>
-                                <span className="text-xs text-muted-foreground">{exec.duration} ms</span>
+                                <span className="ml-auto text-xs text-muted-foreground">{exec.duration} ms</span>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                                {exec.success ? resultSummary(exec.result) : `Failed: ${exec.result}`}
+                            {exec.rationale && (
+                                <p className="mt-1 text-xs italic text-muted-foreground">Why this tool: {exec.rationale}</p>
+                            )}
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                WebMCP → {exec.success ? resultSummary(exec.result) : `Failed: ${exec.result}`}
                             </p>
                         </div>
                     </div>
@@ -226,45 +231,26 @@ function SignalAnalysisCard({ signals }: { signals: Signal[] }) {
     );
 }
 
-function CrossSourceCorrelationCard({ investigation }: { investigation: Investigation }) {
-    if (!investigation.rootCause) return null;
-    const { rawEvidence, rootCause, hypotheses } = investigation;
-    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
-    if (!rootHypothesis) return null;
-
-    const points = rootHypothesis.supportingEvidenceIds
-        .map(id => rawEvidence.find(e => e.id === id))
-        .filter((e): e is Evidence => !!e)
-        .map(e => ({
-            id: e.id,
-            description: e.description,
-            type: e.type,
-        }));
-
-    const getIcon = (type: string) => {
-        switch (type) {
-            case 'Deployment': return <GitCommit size={16} />;
-            case 'Log': return <FileText size={16} />;
-            case 'Metrics': return <TrendingUp size={16} />;
-            case 'Incident': return <AlertCircle size={16} />;
-            default: return <Zap size={16} />;
-        }
-    }
+function EvidenceGraphCard({ chain }: { chain: CausalChainNode[] }) {
+    if (chain.length === 0) return null;
 
     return (
         <Card>
             <CardHeader>
-                <CardTitle>Cross-Source Correlation</CardTitle>
+                <CardTitle>Evidence / Causal Chain</CardTitle>
+                <CardDescription>Derived from the real deployment, metrics and log evidence gathered above.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-                {points.map((point, index) => (
-                    <div key={point.id} className="flex flex-col items-center">
+            <CardContent className="space-y-1">
+                {chain.map((node, index) => (
+                    <div key={`${node.label}-${index}`} className="flex flex-col items-center">
                         <div className="flex w-full items-center gap-3 rounded-md bg-background p-3 text-sm">
-                            <div className="text-muted-foreground">{getIcon(point.type)}</div>
-                            <span className="flex-1">{point.description}</span>
+                            <div className="min-w-0">
+                                <div className="font-mono text-xs font-semibold tracking-wide">{node.label}</div>
+                                <div className="mt-0.5 text-xs text-muted-foreground">{node.detail}</div>
+                            </div>
                         </div>
-                        {index < points.length - 1 && (
-                            <ChevronDown size={20} className="my-1 text-muted-foreground" />
+                        {index < chain.length - 1 && (
+                            <ChevronDown size={18} className="my-0.5 text-muted-foreground" />
                         )}
                     </div>
                 ))}
@@ -273,23 +259,54 @@ function CrossSourceCorrelationCard({ investigation }: { investigation: Investig
     );
 }
 
-function HypothesesCard({ hypotheses }: { hypotheses: Hypothesis[] }) {
+function AgentPerspectivesCard({ perspectives, rawEvidence }: { perspectives: AgentPerspective[]; rawEvidence: Evidence[] }) {
+    if (perspectives.length === 0) return null;
+
+    const evidenceDescription = (id: string) => rawEvidence.find(e => e.id === id)?.description || id;
+
     return (
         <Card>
             <CardHeader>
-                <CardTitle>Hypotheses</CardTitle>
+                <CardTitle>Agent Disagreement</CardTitle>
+                <CardDescription>Four specialized agent perspectives independently evaluating the same evidence pool.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-                {hypotheses.map(h => (
-                    <div key={h.id}>
-                        <div className="flex items-center justify-between">
-                            <p className="font-semibold text-sm">{h.title}</p>
-                            <span className="text-xs font-bold">{h.score}%</span>
+            <CardContent className="space-y-5">
+                {perspectives.map(p => (
+                    <div key={p.id} className="rounded-lg border border-border p-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold">{p.name}</span>
+                            <span className="text-sm font-bold tabular-nums">{p.confidence}%</span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">{h.description}</p>
-                        <div className="mt-2 h-1.5 w-full rounded-full bg-background">
-                            <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${h.score}%` }} />
+                        <div className="mt-1.5 h-1.5 w-full rounded-full bg-background">
+                            <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${p.confidence}%` }} />
                         </div>
+                        <p className="mt-2 text-sm font-medium">{p.hypothesis}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{p.reasoning}</p>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                            {p.toolsConsulted.map(tool => (
+                                <code key={tool} className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{tool}</code>
+                            ))}
+                        </div>
+                        {(p.supportingEvidenceIds.length > 0 || p.contradictingEvidenceIds.length > 0) && (
+                            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                                {p.supportingEvidenceIds.length > 0 && (
+                                    <div>
+                                        <div className="mb-1 font-semibold text-green-500">Supporting</div>
+                                        <ul className="space-y-1 text-muted-foreground">
+                                            {p.supportingEvidenceIds.map(id => <li key={id}>{evidenceDescription(id)}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                {p.contradictingEvidenceIds.length > 0 && (
+                                    <div>
+                                        <div className="mb-1 font-semibold text-red-400">Contradicting</div>
+                                        <ul className="space-y-1 text-muted-foreground">
+                                            {p.contradictingEvidenceIds.map(id => <li key={id}>{evidenceDescription(id)}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 ))}
             </CardContent>
@@ -297,83 +314,59 @@ function HypothesesCard({ hypotheses }: { hypotheses: Hypothesis[] }) {
     );
 }
 
-function RootCauseAssessmentCard({ investigation }: { investigation: Investigation }) {
-    if (!investigation.rootCause) return null;
-    const { rootCause, hypotheses } = investigation;
-    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
-    if (!rootHypothesis) return null;
+function CommanderCard({ commander }: { commander: CommanderAssessment | null }) {
+    if (!commander) return null;
 
     return (
         <Card className="bg-gradient-to-br from-background to-accent/30">
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                     <Target size={18} />
-                    Root Cause Assessment
+                    Incident Commander &mdash; Consensus Assessment
                 </CardTitle>
-                <CardDescription>{rootHypothesis.title}</CardDescription>
             </CardHeader>
             <CardContent>
-                <div className="mb-4 text-sm">
-                    {rootHypothesis.description}
-                </div>
-                <div className="text-sm font-semibold mb-1">Confidence</div>
-                <div className="flex items-center gap-2">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Root cause</div>
+                <p className="text-base font-semibold">{commander.rootCause}</p>
+
+                <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Confidence</div>
+                <div className="mt-1.5 flex items-center gap-2">
                     <div className="h-2 flex-1 rounded-full bg-background/50">
-                        <div
-                            className="h-2 rounded-full bg-green-500"
-                            style={{ width: `${rootCause.confidence}%` }}
-                        />
+                        <div className="h-2 rounded-full bg-green-500" style={{ width: `${commander.confidence}%` }} />
                     </div>
-                    <span className="text-sm font-bold">{rootCause.confidence}%</span>
+                    <span className="text-sm font-bold">{commander.confidence}%</span>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
-                    <div className="flex items-center gap-2">
-                        <Check size={14} className="text-green-500" />
-                        <span>{rootCause.supportingEvidenceCount} supporting evidence</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <X size={14} className="text-red-500" />
-                        <span>{rootCause.contradictingEvidenceCount} contradictions</span>
-                    </div>
+                <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why</div>
+                <ul className="mt-1.5 space-y-1.5 text-sm list-disc pl-5">
+                    {commander.reasoning.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+
+                <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Alternative hypotheses considered</div>
+                <div className="mt-1.5 space-y-2">
+                    {commander.consideredHypotheses.map(h => (
+                        <div key={h.agent} className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">{h.name}: {h.hypothesis}</span>
+                            <span className="font-semibold tabular-nums">{h.confidence}%</span>
+                        </div>
+                    ))}
                 </div>
+
+                {commander.rejected.length > 0 && (
+                    <>
+                        <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why alternatives were rejected</div>
+                        <ul className="mt-1.5 space-y-1.5 text-xs text-muted-foreground">
+                            {commander.rejected.map(r => (
+                                <li key={r.agent}><span className="font-semibold text-foreground">{r.name}:</span> {r.reason}</li>
+                            ))}
+                        </ul>
+                    </>
+                )}
             </CardContent>
         </Card>
     );
 }
 
-function WhyCard({ investigation }: { investigation: Investigation }) {
-    const [open, setOpen] = useState(false);
-    if (!investigation.rootCause) return null;
-    const { rawEvidence, rootCause, hypotheses } = investigation;
-    const rootHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
-    if (!rootHypothesis) return null;
-
-    const evidencePoints = rootHypothesis.supportingEvidenceIds
-        .map(id => rawEvidence.find(e => e.id === id))
-        .filter((e): e is Evidence => !!e);
-
-    return (
-        <Card>
-            <CardHeader onClick={() => setOpen(!open)} className="cursor-pointer">
-                <CardTitle className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Lightbulb size={18} />
-                        Why this hypothesis?
-                    </div>
-                    <ChevronDown size={20} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
-                </CardTitle>
-            </CardHeader>
-            {open && (
-                <CardContent>
-                    <ul className="space-y-2 text-sm list-disc pl-5">
-                        {evidencePoints.map(e => <li key={e.id}>{e.description}</li>)}
-                    </ul>
-                </CardContent>
-            )}
-        </Card>
-    );
-}
 
 function LifecycleTag({ role, label }: { role: 'AGENT' | 'HUMAN' | 'ACTION' | 'VERIFICATION'; label: string }) {
     const styles: Record<typeof role, string> = {
@@ -688,15 +681,12 @@ export default function LiveInvestigation({ webmcpAvailable }: { webmcpAvailable
                 <div className="lg:col-span-2 space-y-8">
                     {investigation && (
                         <>
-                           <RootCauseAssessmentCard investigation={investigation} />
-                           <WhyCard investigation={investigation} />
+                           <AgentPerspectivesCard perspectives={investigation.perspectives} rawEvidence={investigation.rawEvidence} />
+                           <CommanderCard commander={investigation.commander} />
+                           <EvidenceGraphCard chain={investigation.causalChain} />
                            <RemediationPanel investigation={investigation} webmcpAvailable={webmcpAvailable} />
                            <TimelineCard timeline={investigation.timeline} />
                            <SignalAnalysisCard signals={investigation.signals} />
-                           {investigation.correlations && investigation.correlations.length > 0 && (
-                               <CrossSourceCorrelationCard investigation={investigation} />
-                           )}
-                           <HypothesesCard hypotheses={investigation.hypotheses} />
                         </>
                     )}
                     {running && !investigation && (
