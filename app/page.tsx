@@ -1548,86 +1548,75 @@ export default function Page() {
 
     const registerTools = async (modelContext: ModelContext) => {
       /*
-       * Keep registration state local to this effect.
+       * Register every tool concurrently instead of one-at-a-time: a WebMCP
+       * client can query available tools as soon as the page loads, so
+       * registration should complete as fast as possible rather than
+       * serially awaiting each call.
        *
-       * The browser may preserve document.modelContext
-       * between React mounts. Calling registerTool() again
-       * with the same name causes:
-       *
-       * Duplicate tool name
-       *
-       * So we first keep track of the names registered by
-       * this page instance and stop if cleanup happens.
+       * Keep registration state local to this effect. The browser may
+       * preserve document.modelContext between React mounts, so calling
+       * registerTool() again with the same name causes "Duplicate tool
+       * name" — that is not a real failure, the tool is already registered.
        */
-      const registeredNames = new Set<string>()
-      let registeredCount = 0
+      const results = await Promise.allSettled(
+        toolDefinitions.map((definition) => {
+          const meta = tools.find((t) => t.name === definition.name)
 
-      for (const definition of toolDefinitions) {
-        if (cancelled) {
-          return
-        }
-
-        if (
-          registeredNames.has(
-            definition.name,
-          )
-        ) {
-          continue
-        }
-
-        registeredNames.add(
-          definition.name,
-        )
-
-        try {
-          await modelContext.registerTool({
+          return modelContext.registerTool({
             name: definition.name,
             title: definition.title,
             description:
               definition.description,
             inputSchema:
               definition.inputSchema,
-            execute: (args: Record<string, unknown> = {}) => {
+            annotations: {
+              readOnlyHint: meta?.readOnly ?? true,
+              destructiveHint: meta?.mutating ?? false,
+            },
+            execute: async (args: Record<string, unknown> = {}) => {
               return executeTool(
                 definition.name,
                 args,
               )
             },
           })
-          registeredCount += 1
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : String(error)
-
-          /*
-           * Duplicate registration can still happen if
-           * React remounts while the browser bridge keeps
-           * the previous registrations alive. The tool is
-           * still registered with the bridge, so count it.
-           */
-          if (
-            message
-              .toLowerCase()
-              .includes(
-                'duplicate tool name',
-              )
-          ) {
-            registeredCount += 1
-          } else {
-            console.warn(
-              '[NexusOps] WebMCP registration failed:',
-              definition.name,
-              error,
-            )
-          }
-        }
-      }
+        }),
+      )
 
       if (cancelled) {
         return
       }
+
+      let registeredCount = 0
+
+      results.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') {
+          registeredCount += 1
+          return
+        }
+
+        const message =
+          outcome.reason instanceof Error
+            ? outcome.reason.message
+            : String(outcome.reason)
+
+        // Duplicate registration can happen if React remounts while the
+        // browser bridge keeps the previous registrations alive. The tool
+        // is still registered with the bridge, so count it as successful.
+        if (
+          message
+            .toLowerCase()
+            .includes('duplicate tool name')
+        ) {
+          registeredCount += 1
+        } else {
+          console.warn(
+            '[NexusOps] WebMCP registration failed:',
+            toolDefinitions[index].name,
+            outcome.reason,
+          )
+        }
+      })
 
       console.info(
         `[NexusOps] WebMCP: ${registeredCount}/${toolDefinitions.length} tools registered.`,
