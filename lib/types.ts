@@ -154,9 +154,6 @@ export type Investigation = {
     summary: InvestigationSummary;
     timeline: TimelineEvent[];
     signals: Signal[];
-    correlations: CorrelatedEvidence[];
-    hypotheses: Hypothesis[];
-    rootCause: RootCauseAssessment | null;
     recommendation: Recommendation | null;
     rawEvidence: Evidence[];
     perspectives: AgentPerspective[];
@@ -185,28 +182,6 @@ export type Signal = {
     change: string;
     unit: string;
     type: 'latency' | 'error_rate' | 'resource_utilization' | 'other';
-};
-
-export type CorrelatedEvidence = {
-    evidenceIds: string[];
-    description: string;
-};
-
-export type Hypothesis = {
-    id: string;
-    title: string;
-    description: string;
-    score: number; // 0-100
-    supportingEvidenceIds: string[];
-    contradictingEvidenceIds: string[];
-};
-
-export type RootCauseAssessment = {
-    hypothesisId: string;
-    confidence: number; // 0-100
-    supportingEvidenceCount: number;
-    contradictingEvidenceCount: number;
-    explanation: string;
 };
 
 export type Recommendation = {

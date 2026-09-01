@@ -140,6 +140,7 @@ export function invokeTool(
       }
     } else {
       result = {
+        id: incident.id,
         incident_id: incident.id,
         severity:
           incident.severity,

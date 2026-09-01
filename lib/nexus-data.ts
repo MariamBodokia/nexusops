@@ -19,7 +19,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_active_incidents',
     category: 'OBSERVATION',
     description:
-      'List active production incidents requiring operator attention.',
+      'List active production incidents requiring operator attention. Call this first to discover what is currently broken before investigating a specific incident. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -31,7 +31,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_incident',
     category: 'OBSERVATION',
     description:
-      'Retrieve the current state of a specific incident.',
+      'Retrieve the current state of a specific incident: severity, status, affected service and symptoms. Use this to confirm incident details before further investigation. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -41,7 +41,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
   {
     name: 'get_services',
     category: 'OBSERVATION',
-    description: 'Get a list of all services.',
+    description: 'List all services and their current health status. Use this to see the broader service landscape and confirm which services are healthy vs. degraded. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -53,7 +53,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_incident_evidence',
     category: 'OBSERVATION',
     description:
-      'Return correlated metrics, logs, timeline, deployment and finding evidence for an incident.',
+      'Return the consolidated metrics, logs, timeline, deployment and prior-finding evidence already gathered for an incident in one call. Use this to get a single evidence snapshot instead of calling multiple observation tools individually. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -65,7 +65,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_service_health',
     category: 'OBSERVATION',
     description:
-      'Retrieve current health signals for a service.',
+      "Retrieve a service's current health signals: status, latency, error rate, request rate, CPU and memory. Use this to quickly assess whether a service is under resource pressure. Read-only; safe to call at any time.",
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -77,7 +77,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_dependencies',
     category: 'OBSERVATION',
     description:
-      'Retrieve the current service dependency graph and dependency health.',
+      "Retrieve a service's dependency graph and the health of each dependency. Use this to check whether a failure is isolated to one service or part of a broader dependency chain. Read-only; safe to call at any time.",
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -89,7 +89,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_deployment_history',
     category: 'OBSERVATION',
     description:
-      'Retrieve deployment history for a service.',
+      'Retrieve recent deployments for a service, including what changed and when. Use this to check whether a recent release could explain a regression. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -101,7 +101,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_metrics',
     category: 'OBSERVATION',
     description:
-      'Retrieve current telemetry metrics for a service.',
+      "Retrieve a time series of a service's telemetry: latency, request rate, error rate, CPU, memory and database connections. Use this to quantify how severe a degradation is. Read-only; safe to call at any time.",
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -113,7 +113,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_logs',
     category: 'OBSERVATION',
     description:
-      'Retrieve structured application logs for a service.',
+      'Retrieve structured application logs for a service. Use this to find the specific error or timeout events that explain elevated metrics. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -125,7 +125,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_incident_timeline',
     category: 'INVESTIGATION',
     description:
-      'Retrieve the chronological timeline of an incident.',
+      'Retrieve the chronological sequence of events leading up to an incident. Use this to establish whether a deployment or other change preceded the incident. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -137,7 +137,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'compare_metrics',
     category: 'INVESTIGATION',
     description:
-      'Compare incident telemetry against the prior healthy baseline.',
+      "Compare an incident's current telemetry against its prior healthy baseline and return the delta for each metric. Use this to measure how far a service has drifted from normal. Read-only; safe to call at any time.",
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -149,7 +149,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'correlate_events',
     category: 'INVESTIGATION',
     description:
-      'Correlate deployment events, telemetry changes, logs and incident timing.',
+      'Cross-reference deployment events, telemetry changes, log signals and incident timing into one correlation summary. Use this after gathering individual evidence to look for a consistent causal pattern. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'medium',
@@ -161,7 +161,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'run_diagnostic',
     category: 'INVESTIGATION',
     description:
-      'Run an evidence-based diagnostic across incident telemetry without executing remediation.',
+      "Run a structured diagnostic comparing a service's current telemetry, deployments and logs against baseline, returning a diagnosis, confidence and recommended next step. Use this as a final cross-check before proposing remediation. Read-only: it never executes remediation.",
     readOnly: true,
     mutating: false,
     riskLevel: 'medium',
@@ -173,7 +173,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'create_investigation_finding',
     category: 'INVESTIGATION',
     description:
-      'Store an investigation finding for human operator review.',
+      'Store a human-readable investigation finding for operator review. Use this to persist a conclusion so a human can audit how it was reached. Mutating but low-risk: it only appends to the investigation record and cannot affect production.',
     readOnly: false,
     mutating: true,
     riskLevel: 'low',
@@ -185,7 +185,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'propose_remediation',
     category: 'RECOMMENDATION',
     description:
-      'Generate a safe, human-reviewable mitigation recommendation.',
+      'Generate a specific, evidence-based mitigation recommendation (target action, rationale, risk) for a human to review. Use this once a root cause is established. Read-only: it proposes an action but never executes anything and always requires human approval first.',
     readOnly: true,
     mutating: false,
     riskLevel: 'medium',
@@ -197,7 +197,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'approve_remediation',
     category: 'HUMAN CONTROL',
     description:
-      'Record explicit human operator approval for the simulated rollback.',
+      'Record an explicit human operator approval for a specific remediation action on a specific incident. This tool represents a human decision, not an agent decision, and is the only way execute_remediation can subsequently succeed.',
     readOnly: false,
     mutating: true,
     riskLevel: 'medium',
@@ -209,7 +209,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'execute_remediation',
     category: 'ACTION',
     description:
-      'Execute the approved non-destructive simulated rollback.',
+      'Execute a previously proposed, simulated remediation action (e.g. a rollback). Mutating and high-risk: this call is rejected unless a matching approve_remediation call was already recorded for the same incident and action. Never call this without confirmed human approval.',
     readOnly: false,
     mutating: true,
     riskLevel: 'high',
@@ -221,7 +221,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'verify_remediation',
     category: 'VERIFICATION',
     description:
-      'Verify service recovery after remediation.',
+      "Verify whether a service has actually recovered after remediation, based on its real current status and metrics. Use this after execute_remediation; it reports no recovery if remediation hasn't run yet. Read-only; safe to call at any time.",
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -233,7 +233,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'verify_incident',
     category: 'VERIFICATION',
     description:
-      'Verify the current incident state.',
+      'Verify the current state of an incident (open vs. resolved) based on real service status. Use this to check overall incident closure independent of any specific remediation. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',
@@ -245,7 +245,7 @@ export const tools: Omit<Tool, 'inputSchema'>[] = [
     name: 'get_agent_activity',
     category: 'OBSERVATION',
     description:
-      'Read the live audit trail of tool invocations.',
+      'Read the live audit trail of every tool invocation made so far: agent, tool, arguments, duration and success. Use this to review what has already been investigated or executed before duplicating work. Read-only; safe to call at any time.',
     readOnly: true,
     mutating: false,
     riskLevel: 'low',

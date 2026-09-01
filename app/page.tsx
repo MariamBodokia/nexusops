@@ -204,9 +204,9 @@ function AppShell({
               Environment
             </span>
 
-            <span className="flex items-center gap-2 font-semibold text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Production
+            <span className="flex items-center gap-2 font-semibold text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+              Simulated
             </span>
           </div>
 
@@ -227,6 +227,10 @@ function AppShell({
                 : 'UNAVAILABLE'}
             </span>
           </div>
+
+          <p className="mt-3 text-[10px] leading-4 text-muted-foreground">
+            All incident data, telemetry and remediation actions in this demo are simulated. No real production system is affected.
+          </p>
         </div>
       </aside>
 

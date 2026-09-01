@@ -8,10 +8,7 @@ import {
     ToolExecution,
     TimelineEvent,
     Signal,
-    Hypothesis,
-    RootCauseAssessment,
     Recommendation,
-    CorrelatedEvidence,
     AgentRole,
     AgentId,
     AgentPerspective,
@@ -118,8 +115,8 @@ const buildTimeline = (evidence: Evidence[], incident: Incident): TimelineEvent[
     for (const ev of evidence) {
         if (ev.type === 'Deployment') {
             events.push({ time: ev.time, description: ev.description, source: 'Deployments', type: 'deployment' });
-        } else if (ev.type === 'Log' && ev.details[3].includes('connection_timeout')) {
-            events.push({ time: ev.time, description: 'Database connection timeout', source: 'Logs', type: 'log_error' });
+        } else if (ev.type === 'Log') {
+            events.push({ time: ev.time, description: ev.description, source: 'Logs', type: 'log_error' });
         }
     }
 
@@ -187,139 +184,14 @@ const analyzeSignals = (metrics: Metrics): Signal[] => {
     return signals;
 };
 
-const generateHypotheses = (evidence: Evidence[]): Hypothesis[] => {
-    const hypotheses: Hypothesis[] = [];
-    const hasDeployment = evidence.some(e => e.type === 'Deployment');
-    const hasHighTraffic = evidence.some(e => e.type === 'Metrics' && e.details.request_rate.slice(-1)[0] > e.details.request_rate[0] * 1.5);
-    const hasResourceSpike = evidence.some(e => e.type === 'Metrics' && e.details.cpu_percent.slice(-1)[0] > 90);
-
-    if (hasDeployment) {
-        hypotheses.push({
-            id: 'h1',
-            title: 'H1: Connection-pooling regression',
-            description: 'The recent deployment introduced a change in database connection pooling, leading to resource exhaustion.',
-            score: 0,
-            supportingEvidenceIds: [],
-            contradictingEvidenceIds: [],
-        });
-    }
-
-    if (hasHighTraffic) {
-        hypotheses.push({
-            id: 'h2',
-            title: 'H2: Traffic surge',
-            description: 'A sudden increase in user traffic overwhelmed the service.',
-            score: 0,
-            supportingEvidenceIds: [],
-            contradictingEvidenceIds: [],
-        });
-    }
-
-    if (hasResourceSpike) {
-        hypotheses.push({
-            id: 'h3',
-            title: 'H3: CPU Saturation',
-            description: 'The service is CPU-bound, causing a cascading failure under normal load.',
-            score: 0,
-            supportingEvidenceIds: [],
-            contradictingEvidenceIds: [],
-        });
-    }
-
-    if (hypotheses.length === 0) {
-        hypotheses.push({
-            id: 'h-default',
-            title: 'H1: Undetermined External Factor',
-            description: 'The incident may be caused by an external factor not captured by the available tools.',
-            score: 0,
-            supportingEvidenceIds: [],
-            contradictingEvidenceIds: [],
-        });
-    }
-
-    return hypotheses;
-};
-
-const correlateEvidenceForHypotheses = (hypotheses: Hypothesis[], evidence: Evidence[], timeline: TimelineEvent[]): void => {
-    const deploymentEvidence = evidence.find(e => e.type === 'Deployment' && e.details.change.includes('connection-pooling'));
-    const connectionTimeoutLog = evidence.find(e => e.type === 'Log' && e.details[3].includes('connection_timeout'));
-    const dbConnectionSpike = evidence.find(e => e.type === 'Metrics' && e.details.db_connections.slice(-1)[0] > e.details.db_connections[0] * 2);
-    const errorSpike = evidence.find(e => e.type === 'Metrics' && e.details.error_rate.slice(-1)[0] > 5);
-    const latencySpike = evidence.find(e => e.type === 'Metrics' && e.details.latency_ms.slice(-1)[0] > 1000);
-    const incidentStart = timeline.find(t => t.type === 'incident_start');
-    const deploymentEvent = timeline.find(t => t.type === 'deployment');
-
-    // Several signals (latency/error/db) can resolve to the same underlying evidence
-    // item (a single metrics snapshot), so dedupe before recording to avoid double
-    // counting the same evidence in a hypothesis's score or list.
-    const addEvidence = (ids: string[], evidenceItem: Evidence | undefined) => {
-        if (evidenceItem && !ids.includes(evidenceItem.id)) ids.push(evidenceItem.id);
-    };
-
-    for (const h of hypotheses) {
-        if (h.id === 'h1') { // Connection-pooling regression
-            addEvidence(h.supportingEvidenceIds, deploymentEvidence);
-            addEvidence(h.supportingEvidenceIds, connectionTimeoutLog);
-            addEvidence(h.supportingEvidenceIds, dbConnectionSpike);
-            addEvidence(h.supportingEvidenceIds, errorSpike);
-            addEvidence(h.supportingEvidenceIds, latencySpike);
-            if (incidentStart && deploymentEvent && deploymentEvent.time < incidentStart.time) {
-                const depEvidence = evidence.find(e => e.type === 'Deployment');
-                addEvidence(h.supportingEvidenceIds, depEvidence);
-            }
-        } else if (h.id === 'h2') { // Traffic surge
-            const trafficSpike = evidence.find(e => e.type === 'Metrics' && e.details.request_rate.slice(-1)[0] > e.details.request_rate[0] * 1.5);
-            addEvidence(h.supportingEvidenceIds, trafficSpike);
-            addEvidence(h.contradictingEvidenceIds, deploymentEvidence);
-        } else if (h.id === 'h3') { // CPU Saturation
-            const cpuSpike = evidence.find(e => e.type === 'Metrics' && e.details.cpu_percent.slice(-1)[0] > 90);
-            addEvidence(h.supportingEvidenceIds, cpuSpike);
-            addEvidence(h.contradictingEvidenceIds, deploymentEvidence);
-        }
-    }
-};
-
-const assessRootCause = (hypotheses: Hypothesis[]): RootCauseAssessment | null => {
-    if (hypotheses.length === 0) return null;
-
-    hypotheses.forEach(h => {
-        h.score = (h.supportingEvidenceIds.length * 20) - (h.contradictingEvidenceIds.length * 10);
-        h.score = Math.max(0, Math.min(100, h.score));
-    });
-
-    const bestHypothesis = hypotheses.sort((a, b) => b.score - a.score)[0];
-
-    const confidence = bestHypothesis.score;
+const generateRecommendation = (commander: CommanderAssessment | null, incident: Incident): Recommendation | null => {
+    if (!commander) return null;
 
     return {
-        hypothesisId: bestHypothesis.id,
-        confidence,
-        supportingEvidenceCount: bestHypothesis.supportingEvidenceIds.length,
-        contradictingEvidenceCount: bestHypothesis.contradictingEvidenceIds.length,
-        explanation: `This hypothesis is the most likely because it is strongly supported by multiple sources of evidence (${bestHypothesis.supportingEvidenceIds.length}) and has few contradictions (${bestHypothesis.contradictingEvidenceIds.length}).`
-    };
-};
-
-const generateRecommendation = (rootCause: RootCauseAssessment | null, hypotheses: Hypothesis[]): Recommendation | null => {
-    if (!rootCause) return null;
-    const rootCauseHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
-    if (!rootCauseHypothesis) return null;
-
-    let title = 'Review system configuration';
-    let action = 'Investigate system settings and recent changes for misconfigurations.';
-    let reason = 'The root cause is likely related to system configuration.';
-
-    if (rootCauseHypothesis.id === 'h1') {
-        title = 'Review connection-pooling change';
-        action = 'Review the connection-pooling configuration introduced in v2.7.3 and consider rollback/mitigation.';
-        reason = 'The deployment of v2.7.3, which changed connection pooling, is highly correlated with the incident.';
-    }
-
-    return {
-        title,
-        action,
-        risk: 'medium',
-        reason,
+        title: `Review: ${commander.rootCause}`,
+        action: `Investigate ${incident.service} against the evidence behind "${commander.rootCause}" and apply the corresponding fix (for example a rollback or configuration change) if it continues to correlate.`,
+        risk: commander.confidence >= 70 ? 'medium' : 'low',
+        reason: commander.reasoning[0] || `The Incident Commander's arbitration points to: ${commander.rootCause}.`,
         status: 'pending',
     };
 }
@@ -344,8 +216,10 @@ const generateAgentPerspectives = (
     toolExecutions: ToolExecution[],
 ): AgentPerspective[] => {
     const deploymentEvidence = evidence.find(e => e.type === 'Deployment');
-    const connectionPoolingDeployment = evidence.find(e => e.type === 'Deployment' && String(e.details.change).toLowerCase().includes('connection-pooling'));
-    const timeoutLog = evidence.find(e => e.type === 'Log' && String(e.details[3]).includes('connection_timeout'));
+    // Any log evidence item already passed the generic error/timeout filter in
+    // extractEvidenceFromTools, so it can stand in as "the error signal" for any
+    // service/incident, not just one specific error string.
+    const logEvidence = evidence.find(e => e.type === 'Log');
     const metricsEvidence = evidence.find(e => e.type === 'Metrics');
     const incidentEvidence = evidence.find(e => e.type === 'Incident');
 
@@ -365,7 +239,7 @@ const generateAgentPerspectives = (
         name: 'SRE Agent',
         focus: 'Service health, latency, error rate, CPU/memory and database connection utilization.',
         toolsConsulted: ['get_service_health', 'get_metrics', 'compare_metrics'],
-        hypothesis: 'Database connection and resource saturation on payment-api',
+        hypothesis: `Resource / database connection saturation on ${incident.service}`,
         confidence: sreConfidence,
         supportingEvidenceIds: metricsEvidence ? [metricsEvidence.id] : [],
         contradictingEvidenceIds: deploymentEvidence ? [deploymentEvidence.id] : [],
@@ -409,7 +283,7 @@ const generateAgentPerspectives = (
     const latencyPeak = metricsEvidence?.details.latency_ms?.slice(-1)[0];
     const errorSpike = typeof errorPeak === 'number' && errorPeak > 5;
     const latencySpike = typeof latencyPeak === 'number' && latencyPeak > 1000;
-    const devSignals = [Boolean(connectionPoolingDeployment), Boolean(timeoutLog), errorSpike, latencySpike];
+    const devSignals = [Boolean(deploymentEvidence), Boolean(logEvidence), errorSpike, latencySpike];
     const devConfidence = Math.max(5, Math.min(96, devSignals.filter(Boolean).length * 23));
 
     const developer: AgentPerspective = {
@@ -417,17 +291,22 @@ const generateAgentPerspectives = (
         name: 'Developer Agent',
         focus: 'Deployment history, configuration changes, application logs and regressions.',
         toolsConsulted: ['get_deployment_history', 'get_logs', 'correlate_events'],
-        hypothesis: `payment-api ${connectionPoolingDeployment?.details.version ?? deploymentEvidence?.details.version ?? 'latest'} deployment introduced a connection-pooling regression`,
+        hypothesis: deploymentEvidence
+            ? `${incident.service} ${deploymentEvidence.details.version} deployment (${deploymentEvidence.details.change}) correlates with the incident`
+            : `A recent change to ${incident.service} correlates with the incident`,
         confidence: devConfidence,
-        supportingEvidenceIds: [connectionPoolingDeployment, timeoutLog, metricsEvidence].filter((e): e is Evidence => !!e).map(e => e.id),
+        supportingEvidenceIds: [deploymentEvidence, logEvidence, metricsEvidence].filter((e): e is Evidence => !!e).map(e => e.id),
         contradictingEvidenceIds: [],
-        reasoning: `The deployment changed connection pooling configuration${timeoutLog ? ', application logs recorded a database connection timeout shortly after' : ''}${errorSpike ? `, and the HTTP error rate rose to ${errorPeak}%` : ''}${latencySpike ? ` with latency increasing to ${latencyPeak}ms` : ''}.`,
+        reasoning: `${deploymentEvidence ? `The deployment changed: ${deploymentEvidence.details.change}` : 'No recent deployment was found for this service'}${logEvidence ? `, and application logs recorded "${logEvidence.description}" shortly after` : ''}${errorSpike ? `, and the HTTP error rate rose to ${errorPeak}%` : ''}${latencySpike ? ` with latency increasing to ${latencyPeak}ms` : ''}.`,
     };
 
     // ---- SOC Agent: rule out a security-related cause -------------------------
     const securityPattern = /auth|login|token|unauthorized|forbidden|401|403|breach|intrusion|credential/i;
     const allLogs = (resultOfTool(toolExecutions, 'get_logs')?.logs || []) as LogEntry[];
     const suspiciousLogs = allLogs.filter(l => securityPattern.test(`${l[2]} ${l[3]}`));
+    const suspiciousEvidence = suspiciousLogs.length > 0
+        ? evidence.find(e => e.type === 'Log' && suspiciousLogs.some(l => l[0] === e.details[0]))
+        : undefined;
     const socConfidence = suspiciousLogs.length > 0 ? Math.min(90, 20 + suspiciousLogs.length * 15) : 12;
 
     const soc: AgentPerspective = {
@@ -437,8 +316,8 @@ const generateAgentPerspectives = (
         toolsConsulted: ['get_logs', 'get_incident_evidence', 'correlate_events'],
         hypothesis: suspiciousLogs.length > 0 ? 'Security-related event contributing to the incident' : 'No security-related cause identified',
         confidence: socConfidence,
-        supportingEvidenceIds: suspiciousLogs.length > 0 && timeoutLog ? [timeoutLog.id] : [],
-        contradictingEvidenceIds: [connectionPoolingDeployment, metricsEvidence].filter((e): e is Evidence => !!e).map(e => e.id),
+        supportingEvidenceIds: suspiciousEvidence ? [suspiciousEvidence.id] : [],
+        contradictingEvidenceIds: [deploymentEvidence, metricsEvidence].filter((e): e is Evidence => !!e).map(e => e.id),
         reasoning: suspiciousLogs.length > 0
             ? `${suspiciousLogs.length} suspicious authentication or authorization log entries were found.`
             : `No authentication or authorization anomalies were found across ${allLogs.length} reviewed log entries; the observed error rate and latency increases are better explained by the deployment and database connection evidence.`,
@@ -497,7 +376,7 @@ const buildCausalChain = (incident: Incident, evidence: Evidence[]): CausalChain
     const chain: CausalChainNode[] = [];
     const deployment = evidence.find(e => e.type === 'Deployment');
     const metricsEvidence = evidence.find(e => e.type === 'Metrics');
-    const timeoutLog = evidence.find(e => e.type === 'Log' && String(e.details[3]).includes('connection_timeout'));
+    const logEvidence = evidence.find(e => e.type === 'Log');
 
     if (deployment) {
         chain.push({ label: `${deployment.details.version} DEPLOYMENT`, detail: `${deployment.time} \u00b7 ${deployment.details.change}` });
@@ -507,8 +386,8 @@ const buildCausalChain = (incident: Incident, evidence: Evidence[]): CausalChain
         const dbPeak = metricsEvidence.details.db_connections?.slice(-1)[0];
         if (dbPeak !== undefined) chain.push({ label: 'DB CONNECTION UTILIZATION', detail: `${dbPeak} connections (peak)` });
     }
-    if (timeoutLog) {
-        chain.push({ label: 'CONNECTION TIMEOUT', detail: timeoutLog.description });
+    if (logEvidence) {
+        chain.push({ label: 'APPLICATION ERROR SIGNAL', detail: logEvidence.description });
     }
     if (metricsEvidence) {
         const errPeak = metricsEvidence.details.error_rate?.slice(-1)[0];
@@ -529,27 +408,10 @@ const analyzeEvidence = (incident: Incident, toolExecutions: ToolExecution[]): I
     const metrics = toolExecutions.find(t => t.toolName === 'get_metrics')?.result as Metrics;
     const signals = analyzeSignals(metrics);
 
-    const hypotheses = generateHypotheses(allEvidence);
-    correlateEvidenceForHypotheses(hypotheses, allEvidence, timeline);
-
-    const rootCause = assessRootCause(hypotheses);
-    const recommendation = generateRecommendation(rootCause, hypotheses);
-
     const perspectives = generateAgentPerspectives(incident, allEvidence, timeline, toolExecutions);
     const commander = arbitratePerspectives(perspectives, allEvidence);
     const causalChain = buildCausalChain(incident, allEvidence);
-
-    const correlations: CorrelatedEvidence[] = [];
-    if (rootCause) {
-        const rootCauseHypothesis = hypotheses.find(h => h.id === rootCause.hypothesisId);
-        if (rootCauseHypothesis && rootCauseHypothesis.supportingEvidenceIds.length > 1) {
-            correlations.push({
-                evidenceIds: rootCauseHypothesis.supportingEvidenceIds,
-                description: "The deployment, database connection issues, and metric spikes are all linked, pointing to the regression."
-            });
-        }
-    }
-
+    const recommendation = generateRecommendation(commander, incident);
 
     return {
         id: `inv-${incident.id}`,
@@ -563,9 +425,6 @@ const analyzeEvidence = (incident: Incident, toolExecutions: ToolExecution[]): I
         },
         timeline,
         signals,
-        correlations,
-        hypotheses,
-        rootCause,
         recommendation,
         perspectives,
         commander,
