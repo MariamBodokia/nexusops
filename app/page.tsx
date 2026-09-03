@@ -526,7 +526,7 @@ function Overview({
     <>
       <PageHeader
         eyebrow="Production / us-east-1"
-        title="AI-assisted Production Operations"
+        title="WebMCP-assisted Production Operations"
         sub="NexusOps provides an AI-native operations fabric powered by WebMCP for real-time incident investigation and response."
         action={
           <button
